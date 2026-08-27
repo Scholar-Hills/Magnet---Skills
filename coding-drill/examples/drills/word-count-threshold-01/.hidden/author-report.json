@@ -1,0 +1,342 @@
+{
+  "slug": "word-count-threshold-01",
+  "title": "出现次数达标的单词有几个",
+  "language": "javascript",
+  "checkedAt": "2026-08-27T13:29:44",
+  "refill": false,
+  "ok": true,
+  "errorCount": 0,
+  "warnCount": 0,
+  "gates": [
+    {
+      "name": "solution_fail",
+      "level": "OK",
+      "message": "参考解跑通全部用例，期望输出均由实跑得到"
+    },
+    {
+      "name": "difficulty",
+      "level": "OK",
+      "message": "难度 2"
+    },
+    {
+      "name": "sample_count",
+      "level": "OK",
+      "message": "恰好 1 条样例，分值 0，job 为 sample"
+    },
+    {
+      "name": "hidden_count",
+      "level": "OK",
+      "message": "隐藏用例 4 条"
+    },
+    {
+      "name": "hidden_jobs",
+      "level": "OK",
+      "message": "隐藏用例职责两两不同：typical boundary saturated empty"
+    },
+    {
+      "name": "hidden_score",
+      "level": "OK",
+      "message": "每条隐藏用例分值 ≥ 1"
+    },
+    {
+      "name": "score_sum",
+      "level": "OK",
+      "message": "隐藏用例总分 10"
+    },
+    {
+      "name": "dup_id",
+      "level": "OK",
+      "message": "用例 id 两两不同"
+    },
+    {
+      "name": "dup_output",
+      "level": "OK",
+      "message": "所有用例期望输出两两不同"
+    },
+    {
+      "name": "dup_input",
+      "level": "OK",
+      "message": "所有用例输入两两不同"
+    },
+    {
+      "name": "empty_input",
+      "level": "OK",
+      "message": "没有空输入"
+    },
+    {
+      "name": "echo_case",
+      "level": "OK",
+      "message": "没有用例的输出等于输入"
+    },
+    {
+      "name": "empty_expected",
+      "level": "OK",
+      "message": "没有空的期望输出"
+    },
+    {
+      "name": "catches_missing",
+      "level": "OK",
+      "message": "每条隐藏用例都写明了抓的误解"
+    },
+    {
+      "name": "float_out",
+      "level": "OK",
+      "message": "期望输出不含小数"
+    },
+    {
+      "name": "trailing_ws",
+      "level": "OK",
+      "message": "期望输出没有行尾空格"
+    },
+    {
+      "name": "baseline_constant",
+      "level": "OK",
+      "message": "打印样例输出得 0 分"
+    },
+    {
+      "name": "baseline_empty",
+      "level": "OK",
+      "message": "什么都不打印得 0 分"
+    },
+    {
+      "name": "baseline_echo",
+      "level": "OK",
+      "message": "原样回显输入得 0 分"
+    },
+    {
+      "name": "baseline_starter",
+      "level": "OK",
+      "message": "起步骨架原样提交得 0 分"
+    },
+    {
+      "name": "baseline_first_token",
+      "level": "OK",
+      "message": "只打印输入的第一个 token得 0 分"
+    },
+    {
+      "name": "baseline_last_token",
+      "level": "OK",
+      "message": "只打印输入的最后一个 token得 0 分"
+    },
+    {
+      "name": "baseline_first_line",
+      "level": "OK",
+      "message": "只打印输入的第一行得 0 分"
+    },
+    {
+      "name": "baseline_last_line",
+      "level": "OK",
+      "message": "只打印输入的最后一行得 0 分"
+    },
+    {
+      "name": "constant_guessable",
+      "level": "OK",
+      "message": "打印 0 / -1 / 1 / 样例首个 token 都得 0 分"
+    },
+    {
+      "name": "mutants_count",
+      "level": "OK",
+      "message": "错解 4 个"
+    },
+    {
+      "name": "mutant_m1.js",
+      "level": "OK",
+      "message": "错解 m1.js 得 4.0 分（过 c2 c5；挂 c1 c3 c4）"
+    },
+    {
+      "name": "mutant_m2.js",
+      "level": "OK",
+      "message": "错解 m2.js 得 2.0 分（过 c5；挂 c1 c2 c3 c4）"
+    },
+    {
+      "name": "mutant_m3.js",
+      "level": "OK",
+      "message": "错解 m3.js 得 3.0 分（过 c4；挂 c1 c2 c3 c5）"
+    },
+    {
+      "name": "mutant_m4.js",
+      "level": "OK",
+      "message": "错解 m4.js 得 8.0 分（过 c1 c2 c3 c4；挂 c5）"
+    },
+    {
+      "name": "case_uncaught",
+      "level": "OK",
+      "message": "每条隐藏用例都至少被一个错解挂掉"
+    }
+  ],
+  "reference": {
+    "cases": [
+      {
+        "id": "c1",
+        "job": "sample",
+        "verdict": "ok",
+        "timeMs": 39
+      },
+      {
+        "id": "c2",
+        "job": "typical",
+        "verdict": "ok",
+        "timeMs": 41
+      },
+      {
+        "id": "c3",
+        "job": "boundary",
+        "verdict": "ok",
+        "timeMs": 41
+      },
+      {
+        "id": "c4",
+        "job": "saturated",
+        "verdict": "ok",
+        "timeMs": 42
+      },
+      {
+        "id": "c5",
+        "job": "empty",
+        "verdict": "ok",
+        "timeMs": 40
+      }
+    ],
+    "slowestMs": 42
+  },
+  "baselines": {
+    "constant": {
+      "score": 0.0,
+      "verdict": "partial",
+      "passed": [
+        "c1"
+      ]
+    },
+    "empty": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "echo": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "starter": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "first_token": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "last_token": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "first_line": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "last_line": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "const:0": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "const:-1": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "const:1": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "const:9": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    }
+  },
+  "mutants": [
+    {
+      "file": "m1.js",
+      "misconception": "用 > k 代替 >= k：出现次数恰好等于 k 的单词不算达标",
+      "score": 4.0,
+      "passed": [
+        "c2",
+        "c5"
+      ],
+      "failed": [
+        "c1",
+        "c3",
+        "c4"
+      ],
+      "status": "ok",
+      "verdict": "partial"
+    },
+    {
+      "file": "m2.js",
+      "misconception": "把达标单词的出现次数累加起来输出，而不是数不同单词的个数",
+      "score": 2.0,
+      "passed": [
+        "c5"
+      ],
+      "failed": [
+        "c1",
+        "c2",
+        "c3",
+        "c4"
+      ],
+      "status": "ok",
+      "verdict": "partial"
+    },
+    {
+      "file": "m3.js",
+      "misconception": "忘了阈值：直接输出不同单词的总数",
+      "score": 3.0,
+      "passed": [
+        "c4"
+      ],
+      "failed": [
+        "c1",
+        "c2",
+        "c3",
+        "c5"
+      ],
+      "status": "ok",
+      "verdict": "partial"
+    },
+    {
+      "file": "m4.js",
+      "misconception": "一个都没达标时输出 0 而不是 NONE",
+      "score": 8.0,
+      "passed": [
+        "c1",
+        "c2",
+        "c3",
+        "c4"
+      ],
+      "failed": [
+        "c5"
+      ],
+      "status": "ok",
+      "verdict": "partial"
+    }
+  ],
+  "testsHash": "e32327f16efe72c2cb0812c62cc136d0a286722a0e00b60468d1cbda04cb6153",
+  "files": {
+    "tests.json": "e32327f16efe72c2cb0812c62cc136d0a286722a0e00b60468d1cbda04cb6153",
+    "reference": "bb5f3922032e54c360e9e896ac11fac0c161da7c2c496297a6ec4a51f46d78bf",
+    "starter": "738f556e7bc3673e4bbf419fa02d2644380fe5b602dd30e4b159075fdfbd1070",
+    "mutant:m1.js": "23dc8803c90e484d17d2ac641b5b432f686c0ded259d5ac2e21a89396c72af39",
+    "mutant:m2.js": "b730aad689fce088b3bce715736ac51996428e981b2bc193b1a1a5804aa65f95",
+    "mutant:m3.js": "9d152753fed9c670f4edf937f75f38cda72f735779fb1f6baf0c8c6c58079675",
+    "mutant:m4.js": "0389c415b28e23df570d3203dea2b854cc49b52287e5d5bcd17d287bf2fa029e"
+  }
+}

@@ -1,0 +1,320 @@
+{
+  "slug": "binary-search-01",
+  "title": "有序数组里第一个不小于阈值的位置",
+  "language": "python",
+  "checkedAt": "2026-08-27T13:29:41",
+  "refill": false,
+  "ok": true,
+  "errorCount": 0,
+  "warnCount": 0,
+  "gates": [
+    {
+      "name": "solution_fail",
+      "level": "OK",
+      "message": "参考解跑通全部用例，期望输出均由实跑得到"
+    },
+    {
+      "name": "difficulty",
+      "level": "OK",
+      "message": "难度 2"
+    },
+    {
+      "name": "sample_count",
+      "level": "OK",
+      "message": "恰好 1 条样例，分值 0，job 为 sample"
+    },
+    {
+      "name": "hidden_count",
+      "level": "OK",
+      "message": "隐藏用例 4 条"
+    },
+    {
+      "name": "hidden_jobs",
+      "level": "OK",
+      "message": "隐藏用例职责两两不同：typical boundary order empty"
+    },
+    {
+      "name": "hidden_score",
+      "level": "OK",
+      "message": "每条隐藏用例分值 ≥ 1"
+    },
+    {
+      "name": "score_sum",
+      "level": "OK",
+      "message": "隐藏用例总分 10"
+    },
+    {
+      "name": "dup_id",
+      "level": "OK",
+      "message": "用例 id 两两不同"
+    },
+    {
+      "name": "dup_output",
+      "level": "OK",
+      "message": "所有用例期望输出两两不同"
+    },
+    {
+      "name": "dup_input",
+      "level": "OK",
+      "message": "所有用例输入两两不同"
+    },
+    {
+      "name": "empty_input",
+      "level": "OK",
+      "message": "没有空输入"
+    },
+    {
+      "name": "echo_case",
+      "level": "OK",
+      "message": "没有用例的输出等于输入"
+    },
+    {
+      "name": "empty_expected",
+      "level": "OK",
+      "message": "没有空的期望输出"
+    },
+    {
+      "name": "catches_missing",
+      "level": "OK",
+      "message": "每条隐藏用例都写明了抓的误解"
+    },
+    {
+      "name": "float_out",
+      "level": "OK",
+      "message": "期望输出不含小数"
+    },
+    {
+      "name": "trailing_ws",
+      "level": "OK",
+      "message": "期望输出没有行尾空格"
+    },
+    {
+      "name": "baseline_constant",
+      "level": "OK",
+      "message": "打印样例输出得 0 分"
+    },
+    {
+      "name": "baseline_empty",
+      "level": "OK",
+      "message": "什么都不打印得 0 分"
+    },
+    {
+      "name": "baseline_echo",
+      "level": "OK",
+      "message": "原样回显输入得 0 分"
+    },
+    {
+      "name": "baseline_starter",
+      "level": "OK",
+      "message": "起步骨架原样提交得 0 分"
+    },
+    {
+      "name": "baseline_first_token",
+      "level": "OK",
+      "message": "只打印输入的第一个 token得 0 分"
+    },
+    {
+      "name": "baseline_last_token",
+      "level": "OK",
+      "message": "只打印输入的最后一个 token得 0 分"
+    },
+    {
+      "name": "baseline_first_line",
+      "level": "OK",
+      "message": "只打印输入的第一行得 0 分"
+    },
+    {
+      "name": "baseline_last_line",
+      "level": "OK",
+      "message": "只打印输入的最后一行得 0 分"
+    },
+    {
+      "name": "constant_guessable",
+      "level": "OK",
+      "message": "打印 0 / -1 / 1 / 样例首个 token 都得 0 分"
+    },
+    {
+      "name": "mutants_count",
+      "level": "OK",
+      "message": "错解 3 个"
+    },
+    {
+      "name": "mutant_m1.py",
+      "level": "OK",
+      "message": "错解 m1.py 得 4.0 分（过 c2 c5；挂 c1 c3 c4）"
+    },
+    {
+      "name": "mutant_m2.py",
+      "level": "OK",
+      "message": "错解 m2.py 得 5.0 分（过 c1 c3 c5；挂 c2 c4）"
+    },
+    {
+      "name": "mutant_m3.py",
+      "level": "OK",
+      "message": "错解 m3.py 得 8.0 分（过 c1 c2 c3 c4；挂 c5）"
+    },
+    {
+      "name": "case_uncaught",
+      "level": "OK",
+      "message": "每条隐藏用例都至少被一个错解挂掉"
+    }
+  ],
+  "reference": {
+    "cases": [
+      {
+        "id": "c1",
+        "job": "sample",
+        "verdict": "ok",
+        "timeMs": 30
+      },
+      {
+        "id": "c2",
+        "job": "typical",
+        "verdict": "ok",
+        "timeMs": 31
+      },
+      {
+        "id": "c3",
+        "job": "boundary",
+        "verdict": "ok",
+        "timeMs": 32
+      },
+      {
+        "id": "c4",
+        "job": "order",
+        "verdict": "ok",
+        "timeMs": 31
+      },
+      {
+        "id": "c5",
+        "job": "empty",
+        "verdict": "ok",
+        "timeMs": 32
+      }
+    ],
+    "slowestMs": 32
+  },
+  "baselines": {
+    "constant": {
+      "score": 0.0,
+      "verdict": "partial",
+      "passed": [
+        "c1"
+      ]
+    },
+    "empty": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "echo": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "starter": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "first_token": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "last_token": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "first_line": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "last_line": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "const:0": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "const:-1": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "const:1": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    },
+    "const:5": {
+      "score": 0.0,
+      "verdict": "wrong_answer",
+      "passed": []
+    }
+  },
+  "mutants": [
+    {
+      "file": "m1.py",
+      "misconception": "用 > 代替 >=：找的是第一个严格大于 goal 的元素，等于 goal 的元素被跳过",
+      "score": 4.0,
+      "passed": [
+        "c2",
+        "c5"
+      ],
+      "failed": [
+        "c1",
+        "c3",
+        "c4"
+      ],
+      "status": "ok",
+      "verdict": "partial"
+    },
+    {
+      "file": "m2.py",
+      "misconception": "写成精确查找：撞上相等元素立刻返回该位置（不再往左收），数组里没有 goal 时直接报 NONE",
+      "score": 5.0,
+      "passed": [
+        "c1",
+        "c3",
+        "c5"
+      ],
+      "failed": [
+        "c2",
+        "c4"
+      ],
+      "status": "ok",
+      "verdict": "partial"
+    },
+    {
+      "file": "m3.py",
+      "misconception": "“没找到”输出 0 而不是 NONE",
+      "score": 8.0,
+      "passed": [
+        "c1",
+        "c2",
+        "c3",
+        "c4"
+      ],
+      "failed": [
+        "c5"
+      ],
+      "status": "ok",
+      "verdict": "partial"
+    }
+  ],
+  "testsHash": "e9347ba135984b9aae033a2c6845149d7b710b62606c4deced18ada72dfd2207",
+  "files": {
+    "tests.json": "e9347ba135984b9aae033a2c6845149d7b710b62606c4deced18ada72dfd2207",
+    "reference": "c95dc426bfae4977cb5af19540d4a4f7e41cbbbb352bcb4633e6b4f68cfbab78",
+    "starter": "21ed7dc734b60ea8e0896fff9a54f674153371010f7000a46405110cae61ebd7",
+    "mutant:m1.py": "5fac91d30b48aae4e2142d58041f061b894b7025423c42f950f7653d8fc71ecb",
+    "mutant:m2.py": "b58176998eb099e5979e7f889a86078f610f575bcc58145676ad63751d2e53a0",
+    "mutant:m3.py": "7ccc7591a9a18a27d4cce5301101b18c4ead8f1e8dd488c2e38762f6f92df709"
+  }
+}

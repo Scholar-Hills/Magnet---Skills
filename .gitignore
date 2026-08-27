@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.DS_Store
+# 示例题包只保留参考解判题报告；错题本与导出件是本机运行产物
+*/examples/drills/misconceptions.md
+*/examples/drills/*/export.json

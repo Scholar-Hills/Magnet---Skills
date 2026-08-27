@@ -1,0 +1,77 @@
+{
+  "slug": "binary-search-01",
+  "title": "有序数组里第一个不小于阈值的位置",
+  "language": "python",
+  "file": "drills/binary-search-01/.hidden/reference.py",
+  "judgedAt": "2026-08-27T14:28:26",
+  "score": 10.0,
+  "fullScore": 10,
+  "earned": 10,
+  "total": 10,
+  "verdict": "accepted",
+  "passedCount": 5,
+  "caseCount": 5,
+  "compileError": null,
+  "revealAll": false,
+  "cases": [
+    {
+      "id": "c1",
+      "job": "sample",
+      "isSample": true,
+      "score": 0,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 31,
+      "catches": "",
+      "revealed": true,
+      "input": "5\n10 20 30 40 50\n30",
+      "expected": "3",
+      "actual": "3"
+    },
+    {
+      "id": "c2",
+      "job": "typical",
+      "isSample": false,
+      "score": 2,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 31,
+      "catches": "写成精确查找：goal 不在数组里时直接输出 NONE，而不是给出第一个更大元素的位置",
+      "revealed": false
+    },
+    {
+      "id": "c3",
+      "job": "boundary",
+      "isSample": false,
+      "score": 3,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 33,
+      "catches": "用 > 代替 >=，恰好等于 goal 的那个元素被跳过，答案落到了下一个更大的元素上",
+      "revealed": false
+    },
+    {
+      "id": "c4",
+      "job": "order",
+      "isSample": false,
+      "score": 3,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 32,
+      "catches": "二分撞上相等元素就立刻返回 mid，返回的是中间那个 26 的位置，不是最靠左的那个",
+      "revealed": false
+    },
+    {
+      "id": "c5",
+      "job": "empty",
+      "isSample": false,
+      "score": 2,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 32,
+      "catches": "所有元素都小于 goal 时输出 0 或 n+1，而不是题面要求的 NONE",
+      "revealed": false
+    }
+  ],
+  "newMisconceptions": []
+}

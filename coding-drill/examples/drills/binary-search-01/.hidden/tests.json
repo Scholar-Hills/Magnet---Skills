@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "id": "c1",
+      "isSample": true,
+      "score": 0,
+      "job": "sample",
+      "input": "5\n10 20 30 40 50\n30",
+      "expected": "3",
+      "catches": ""
+    },
+    {
+      "id": "c2",
+      "isSample": false,
+      "score": 2,
+      "job": "typical",
+      "input": "8\n11 19 24 30 38 45 51 60\n44",
+      "expected": "6",
+      "catches": "写成精确查找：goal 不在数组里时直接输出 NONE，而不是给出第一个更大元素的位置"
+    },
+    {
+      "id": "c3",
+      "isSample": false,
+      "score": 3,
+      "job": "boundary",
+      "input": "7\n12 25 31 44 58 63 77\n44",
+      "expected": "4",
+      "catches": "用 > 代替 >=，恰好等于 goal 的那个元素被跳过，答案落到了下一个更大的元素上"
+    },
+    {
+      "id": "c4",
+      "isSample": false,
+      "score": 3,
+      "job": "order",
+      "input": "9\n11 26 26 26 26 26 40 55 70\n26",
+      "expected": "2",
+      "catches": "二分撞上相等元素就立刻返回 mid，返回的是中间那个 26 的位置，不是最靠左的那个"
+    },
+    {
+      "id": "c5",
+      "isSample": false,
+      "score": 2,
+      "job": "empty",
+      "input": "6\n13 21 34 42 57 68\n90",
+      "expected": "NONE",
+      "catches": "所有元素都小于 goal 时输出 0 或 n+1，而不是题面要求的 NONE"
+    }
+  ]
+}

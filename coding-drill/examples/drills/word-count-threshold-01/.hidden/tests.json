@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "id": "c1",
+      "isSample": true,
+      "score": 0,
+      "job": "sample",
+      "input": "9\nred blue red green blue red pink blue pink\n2",
+      "expected": "3",
+      "catches": ""
+    },
+    {
+      "id": "c2",
+      "isSample": false,
+      "score": 2,
+      "job": "typical",
+      "input": "14\ntea tea tea milk milk milk rice rice rice cake cake cake jam salt\n2",
+      "expected": "4",
+      "catches": "根本没按 k 过滤，直接输出不同单词的总数（这里是 6），把 jam 和 salt 也算了进去"
+    },
+    {
+      "id": "c3",
+      "isSample": false,
+      "score": 3,
+      "job": "boundary",
+      "input": "10\nink ink ink ink pen pen pen pen pen dot\n4",
+      "expected": "2",
+      "catches": "用 > k 代替 >= k，出现次数恰好等于 k 的 ink 被漏掉，只数出了 pen"
+    },
+    {
+      "id": "c4",
+      "isSample": false,
+      "score": 3,
+      "job": "saturated",
+      "input": "10\none one two two six six ten ten fun fun\n2",
+      "expected": "5",
+      "catches": "输出的是达标单词的出现总次数（这里是 10），而不是达标的不同单词个数"
+    },
+    {
+      "id": "c5",
+      "isSample": false,
+      "score": 2,
+      "job": "empty",
+      "input": "7\nkiwi kiwi lime lime mint sage sage\n3",
+      "expected": "NONE",
+      "catches": "一个单词都没达标时输出 0，而不是题面要求的 NONE"
+    }
+  ]
+}

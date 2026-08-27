@@ -1,0 +1,12 @@
+{
+  "slug": "word-count-threshold-01",
+  "title": "出现次数达标的单词有几个",
+  "topic": "字符串处理——统计单词",
+  "language": "javascript",
+  "difficulty": 2,
+  "difficultyReason": "两个构造组合：先遍历建词频表，再按阈值过滤计数；边界是“恰好等于 k 次”算达标，外加“一个都没有”要输出 NONE 的特例",
+  "timeLimitMs": 2000,
+  "compareMode": "trim",
+  "createdAt": "2026-08-27",
+  "mode": "learner"
+}

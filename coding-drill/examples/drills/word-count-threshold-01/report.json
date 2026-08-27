@@ -1,0 +1,77 @@
+{
+  "slug": "word-count-threshold-01",
+  "title": "出现次数达标的单词有几个",
+  "language": "javascript",
+  "file": "drills/word-count-threshold-01/.hidden/reference.js",
+  "judgedAt": "2026-08-27T14:28:45",
+  "score": 10.0,
+  "fullScore": 10,
+  "earned": 10,
+  "total": 10,
+  "verdict": "accepted",
+  "passedCount": 5,
+  "caseCount": 5,
+  "compileError": null,
+  "revealAll": false,
+  "cases": [
+    {
+      "id": "c1",
+      "job": "sample",
+      "isSample": true,
+      "score": 0,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 43,
+      "catches": "",
+      "revealed": true,
+      "input": "9\nred blue red green blue red pink blue pink\n2",
+      "expected": "3",
+      "actual": "3"
+    },
+    {
+      "id": "c2",
+      "job": "typical",
+      "isSample": false,
+      "score": 2,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 43,
+      "catches": "根本没按 k 过滤，直接输出不同单词的总数（这里是 6），把 jam 和 salt 也算了进去",
+      "revealed": false
+    },
+    {
+      "id": "c3",
+      "job": "boundary",
+      "isSample": false,
+      "score": 3,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 42,
+      "catches": "用 > k 代替 >= k，出现次数恰好等于 k 的 ink 被漏掉，只数出了 pen",
+      "revealed": false
+    },
+    {
+      "id": "c4",
+      "job": "saturated",
+      "isSample": false,
+      "score": 3,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 44,
+      "catches": "输出的是达标单词的出现总次数（这里是 10），而不是达标的不同单词个数",
+      "revealed": false
+    },
+    {
+      "id": "c5",
+      "job": "empty",
+      "isSample": false,
+      "score": 2,
+      "passed": true,
+      "verdict": "accepted",
+      "timeMs": 42,
+      "catches": "一个单词都没达标时输出 0，而不是题面要求的 NONE",
+      "revealed": false
+    }
+  ],
+  "newMisconceptions": []
+}

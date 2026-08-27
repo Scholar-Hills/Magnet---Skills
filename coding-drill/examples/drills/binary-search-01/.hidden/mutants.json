@@ -1,0 +1,7 @@
+{
+  "mutants": [
+    { "file": "m1.py", "misconception": "用 > 代替 >=：找的是第一个严格大于 goal 的元素，等于 goal 的元素被跳过" },
+    { "file": "m2.py", "misconception": "写成精确查找：撞上相等元素立刻返回该位置（不再往左收），数组里没有 goal 时直接报 NONE" },
+    { "file": "m3.py", "misconception": "“没找到”输出 0 而不是 NONE" }
+  ]
+}

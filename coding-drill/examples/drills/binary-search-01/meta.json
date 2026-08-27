@@ -1,0 +1,12 @@
+{
+  "slug": "binary-search-01",
+  "title": "有序数组里第一个不小于阈值的位置",
+  "topic": "二分查找",
+  "language": "python",
+  "difficulty": 2,
+  "difficultyReason": "一个二分循环加一个要推理的边界：goal 恰好等于某个元素、且该元素重复出现时必须取最左位置，还要处理“全都小于 goal”的特例",
+  "timeLimitMs": 2000,
+  "compareMode": "trim",
+  "createdAt": "2026-08-27",
+  "mode": "learner"
+}

@@ -1,0 +1,8 @@
+{
+  "mutants": [
+    { "file": "m1.js", "misconception": "用 > k 代替 >= k：出现次数恰好等于 k 的单词不算达标" },
+    { "file": "m2.js", "misconception": "把达标单词的出现次数累加起来输出，而不是数不同单词的个数" },
+    { "file": "m3.js", "misconception": "忘了阈值：直接输出不同单词的总数" },
+    { "file": "m4.js", "misconception": "一个都没达标时输出 0 而不是 NONE" }
+  ]
+}
