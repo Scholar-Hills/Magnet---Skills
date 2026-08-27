@@ -22,8 +22,8 @@ allowed-tools: Bash, Read, Write, Edit
 
 ## 前置检查（不可跳过）
 
-0. **定位脚本**。本 Skill 的脚本在 Skill 目录下，不在用户工作区。按顺序找，取第一个存在的绝对路径记作 `JUDGE`：
-   ① `~/.claude/skills/coding-drill/scripts/judge.py`；② 当前项目的 `.claude/skills/coding-drill/scripts/judge.py`；③ 用户在对话里指定的 Skill 目录下的 `scripts/judge.py`；④ 都没有就 `find . ~/.claude -path '*coding-drill/scripts/judge.py' 2>/dev/null | head -1` 搜一次。
+0. **定位脚本**。本 Skill 的脚本在 Skill 目录下，不在用户工作区。按顺序找 `coding-drill/scripts/judge.py`，取第一个存在的绝对路径记作 `JUDGE`：
+   ① 这份 SKILL.md 所在目录下的 `scripts/judge.py`（你就是从那个目录读到本文件的）；② Claude Code：`~/.claude/skills/coding-drill/`、当前项目 `.claude/skills/coding-drill/`；③ WorkBuddy / CodeBuddy：`~/.workbuddy/skills/coding-drill/`、`~/.workbuddy-ai/skills/coding-drill/`、`~/.codebuddy/skills/coding-drill/`、当前项目 `.codebuddy/skills/coding-drill/`；④ OpenClaw：`~/.openclaw/workspace/skills/coding-drill/`；⑤ 小红书 `redskill install` 的默认位置：当前目录 `./skills/coding-drill/`；⑥ 用户在对话里指定的目录；⑦ 都没有就搜一次：`find . ~/.claude ~/.workbuddy ~/.workbuddy-ai ~/.codebuddy ~/.openclaw -path '*coding-drill/scripts/judge.py' 2>/dev/null | head -1`。
    本文后面所有 `python3 scripts/judge.py …` 都读作 `python3 "$JUDGE" …`，并且始终在用户工作区（`drills/` 的父目录）下执行：`cd <工作区> && python3 "$JUDGE" author drills/<slug>`。
    **四处都找不到就立即停止**，告诉用户“这份 Skill 的判题脚本缺失，请重新下载完整目录”。**任何情况下都不要自己写一个替代脚本**——手写的判题器没有本 Skill 的回填与基线闸门，会让用户误以为题目通过了验证。
 1. 运行 `python3 "$JUDGE" doctor`。`python3` 不存在就试 `python`（Windows 常见）；两个都没有，告诉用户先装 Python 3.8+，不要继续。JavaScript 题需要 `node`，Java 题需要 `javac` 与 `java`；缺哪个就不出那种语言的题。
@@ -34,6 +34,8 @@ allowed-tools: Bash, Read, Write, Edit
 ## 出题流程（学习者模式）
 
 格式以 `references/problem-format.md` 为准，规则以 `references/authoring-rules.md` 为准——**先读这两份**再出题。按顺序做，不要跳步。
+
+**回复语言跟随用户**：用户用中文就全程中文，用英文就全程英文；不要中英混着来。
 
 **动手前先说一句**：“我来出一道 ＜知识点＞ 的题，会先写好参考解和隐藏用例，然后在你机器上真跑一遍自检（打印常量、空程序、回显输入、原样骨架四个非解必须全部 0 分）。大概要一两分钟，中间没有输出是正常的。”非交互场景（批处理、子任务）就把这句写进最终报告的开头。
 

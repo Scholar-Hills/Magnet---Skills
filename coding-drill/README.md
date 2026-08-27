@@ -25,7 +25,18 @@ cp -R /tmp/coding-drill-src/coding-drill ~/.claude/skills/coding-drill
 
 装完的样子是 `~/.claude/skills/coding-drill/SKILL.md`。只想给某个项目用，就换成该项目下的 `.claude/skills/coding-drill/`（同样要有 `coding-drill` 这一层）。重开一个会话，输入 `/skills` 能看到 `coding-drill` 就是装好了；然后说一句“出题 二分查找 Python 中等”。
 
-**其他 Agent**：把 `coding-drill` 目录放进工作区，让 Agent 先读 `SKILL.md`。
+**WorkBuddy（腾讯）**
+
+```bash
+git clone https://github.com/<org>/<repo>.git /tmp/coding-drill-src
+cp -R /tmp/coding-drill-src/coding-drill ~/.workbuddy-ai/skills/coding-drill
+```
+
+WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数据目录是 `~/.workbuddy/`，就放到 `~/.workbuddy/skills/coding-drill`。装完在对话框输入 `/skills`，列表里有 `coding-drill` 即可。
+
+**用之前先选一个固定工作区**（输入框下方「Select Workspace」→ Open Local Folder，选一个专门放题的文件夹）。不选的话 WorkBuddy 会给每个任务新建一个 `~/WorkBuddy AI/<时间戳>/` 目录，题目和错题本会散落在不同目录里，错题本就积累不起来了。
+
+**其他 Agent**（OpenClaw、Codex 等）：把 `coding-drill` 目录放进各自的技能目录或工作区（OpenClaw 为 `~/.openclaw/workspace/skills/`），让 Agent 先读 `SKILL.md`。
 
 **（从小红书来的读者）** 笔记下方的 RED Skill 组件里可以一键复制安装口令，直接发给你的 Agent 即可，不用手动 clone。
 
