@@ -6,7 +6,8 @@
 校验它确实来自原文，并把结果渲染成一页可截图的 HTML。
 
 公开接口：
-  extract(html)                    一次遍历同时产出纯文本与位置映射
+  sanitize(html)                   白名单消毒；正文进引擎前必经的第一道
+  extract(html)                    消毒后一次遍历同时产出纯文本与位置映射
   plain_text(html)                 extract(html).text 的快捷方式
   normalize(s)                     引文与原文共用的规范化（供各 Skill 的 CLI 复用）
   locate(ex, quote)                在原文里定位一句引文，返回 (start, end, partial)
@@ -37,10 +38,8 @@ LEVELS = ("major", "minor", "remark")
 DEFAULT_LEVEL = "remark"
 
 
-# ---------------------------------------------------------------- 抽取
-
 class Extraction(NamedTuple):
-    """一次遍历的产物：给模型看的纯文本，以及每个字符在原 HTML 里的区间。"""
+    """一次遍历的产物：给模型看的纯文本，以及每个字符在（消毒后的）HTML 里的区间。"""
     text: str
     spans: List[Tuple[int, int]]
     html: str
@@ -53,12 +52,182 @@ class AnnotateResult(NamedTuple):
     anchored_ratio: float
 
 
+class _Located(HTMLParser):
+    """带绝对偏移的解析器基类：getpos() 经预建行首表 O(1) 换算，不用 raw.find(data) 猜。"""
+
+    def __init__(self, src: str):
+        HTMLParser.__init__(self, convert_charrefs=False)
+        self.src = src
+        self._line_head = [0]
+        for i, ch in enumerate(src):
+            if ch == "\n":
+                self._line_head.append(i + 1)
+
+    def _offset(self) -> int:
+        line, col = self.getpos()
+        if line - 1 < len(self._line_head):
+            return self._line_head[line - 1] + col
+        return len(self.src)
+
+    def _ref_span(self, prefix_len: int, name: str) -> Tuple[int, int]:
+        """当前实体引用在 src 里的区间（含可选的分号）。"""
+        start = self._offset()
+        end = start + prefix_len + len(name)
+        if self.src[end:end + 1] == ";":
+            end += 1
+        return start, end
+
+
+# ---------------------------------------------------------------- 消毒
+
+# 正文来自学生作答与老师题干（题干允许含 HTML），是不可信输入；判题卡又是老师在
+# 本地双击打开的文件。所以正文进引擎前先过白名单：只留排版需要的标签，属性只留
+# 排版属性，script / style / iframe 这类连内容一起丢，其余标签脱掉外壳但保留文字。
+#
+# 引擎自己的标记（<mark>、class、data-an）对任何来源一律丢：正文自带的 mark 与
+# class / data-an 长得和引擎钉上去的一模一样，混进左栏就是一条伪造的批注，还会
+# 被页面的联动高亮认领。先消毒再批注，伪造标记在定位前就不存在，输出里的
+# data-an 只可能来自引擎。
+_SAFE_TAGS = frozenset((
+    "p", "div", "ul", "ol", "li", "table", "thead", "tbody", "tr", "td", "th",
+    "h1", "h2", "h3", "h4", "h5", "h6", "br", "blockquote", "pre", "code",
+    "b", "strong", "i", "em", "u", "s",
+))
+_SAFE_ATTRS = frozenset((
+    "title", "id", "lang", "dir", "colspan", "rowspan", "headers", "scope",
+    "start", "reversed", "value", "type", "align", "valign", "width", "height",
+    "border", "cellpadding", "cellspacing", "summary", "abbr", "role",
+))
+_ENGINE_ATTRS = frozenset(("class", "data-an"))
+_VOID_TAGS = frozenset((
+    "br", "img", "hr", "input", "meta", "link", "source", "col",
+    "area", "base", "wbr", "embed", "param", "track", "frame",
+))
+_DROP_SUBTREE = frozenset((
+    "script", "style", "iframe", "object", "embed", "applet", "noscript",
+    "template", "svg", "math", "form", "select", "textarea", "button",
+    "canvas", "audio", "video", "frame", "frameset",
+))
+_ATTR_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+# 「干净」的开始标签：小写标签名、属性都是 name="value"、值里没有尖括号。这样的
+# 标签原样回写，其余的重拼 —— 于是干净输入过一遍恒等，脏输入过一遍就成了干净输入。
+_CLEAN_TAG = re.compile(r'^<([a-z][a-z0-9]*)(?:\s+[a-z][a-z0-9-]*="[^"<>]*")*\s*(/?)>$')
+
+
+def _attr_ok(name: str) -> bool:
+    if name in _ENGINE_ATTRS or not _ATTR_NAME.match(name):
+        return False
+    return name in _SAFE_ATTRS or name.startswith("data-") or name.startswith("aria-")
+
+
+class _Cleaner(_Located):
+    """白名单过滤器：重新拼一份只含安全标签与安全属性的 HTML，顺手把标签配平。
+
+    文本里带分号的实体引用原样透传，没分号的解成字符，裸的 & < > 转义；标签要么原样（干净）要么重拼
+    （属性名小写、双引号、值经 escape）。两条路的产物都再匹配「干净」判据，
+    所以 sanitize 幂等。
+    """
+
+    def __init__(self, src: str):
+        _Located.__init__(self, src)
+        self.out = []                        # type: List[str]
+        self.open_tags = []                  # type: List[str]
+        self._drop_tag = None
+        self._drop_depth = 0
+
+    def _tag_text(self, name: str, attrs) -> str:
+        raw = self.get_starttag_text() or ""
+        m = _CLEAN_TAG.match(raw)
+        if (m and m.group(1) == name and (not m.group(2) or name in _VOID_TAGS)
+                and all(_attr_ok(k) for k, _ in attrs)):
+            return raw
+        kept = "".join(' %s="%s"' % (k, _escape(v or "", quote=True))
+                       for k, v in attrs if _attr_ok(k))
+        return "<%s%s>" % (name, kept)
+
+    def handle_starttag(self, tag, attrs):
+        name = tag.lower()
+        if self._drop_depth:
+            if name == self._drop_tag:
+                self._drop_depth += 1
+            return
+        if name in _DROP_SUBTREE:
+            if name not in _VOID_TAGS:       # 空元素等不到闭合标签，进了 drop 模式就再也出不来
+                self._drop_tag, self._drop_depth = name, 1
+            return
+        if name not in _SAFE_TAGS:
+            return                           # 脱掉外壳，里面的文字照留（mark 也走这条）
+        self.out.append(self._tag_text(name, attrs))
+        if name not in _VOID_TAGS:
+            self.open_tags.append(name)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in _VOID_TAGS:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        name = tag.lower()
+        if self._drop_depth:
+            if name == self._drop_tag:
+                self._drop_depth -= 1
+                if not self._drop_depth:
+                    self._drop_tag = None
+            return
+        if name in _VOID_TAGS or name not in self.open_tags:
+            return                           # 野生的闭合标签，丢掉
+        while self.open_tags:
+            top = self.open_tags.pop()
+            self.out.append("</%s>" % top)
+            if top == name:
+                break
+
+    def handle_data(self, data):
+        if not self._drop_depth and data:
+            self.out.append(_escape(data, quote=False))
+
+    def _ref(self, prefix_len: int, name: str) -> None:
+        if self._drop_depth:
+            return
+        a, b = self._ref_span(prefix_len, name)
+        raw = self.src[a:b]
+        if raw[:1] != "&":                   # 兜底：偏移对不上就按引用的规范写法放
+            raw = "&%s%s;" % ("#" if prefix_len == 2 else "", name)
+        if raw.endswith(";"):
+            self.out.append(raw)             # 带分号的引用原样透传，干净输入才能恒等
+        else:
+            # 没分号的引用（&nbsp、&foo）解析依赖后面跟的是什么字符，透传到下一次
+            # 消毒时邻居可能已变，不幂等；按浏览器的解法解成字符再转义最稳。
+            self.out.append(_escape(_unescape(raw), quote=False))
+
+    def handle_entityref(self, name):
+        self._ref(1, name)
+
+    def handle_charref(self, name):
+        self._ref(2, name)
+
+    def result(self) -> str:
+        while self.open_tags:                # 没闭合的补上，免得撑破整页布局
+            self.out.append("</%s>" % self.open_tags.pop())
+        return "".join(self.out)
+
+
+def sanitize(html: str) -> str:
+    """把一段 HTML 过成只含白名单标签与排版属性的安全版本；引擎标记一律剥掉。"""
+    src = html or ""
+    cleaner = _Cleaner(src)
+    cleaner.feed(src)
+    cleaner.close()
+    return cleaner.result()
+
+
+# ---------------------------------------------------------------- 抽取
+
 # 边界处要在纯文本里插一个换行分隔符的标签
 _BLOCK_TAGS = frozenset((
     "p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6",
     "br", "blockquote", "pre", "td", "th",
 ))
-_SKIP_TAGS = frozenset(("script", "style"))
 _BLANK_LINE = re.compile(r"\n[ \t]*\n")
 
 # 判「这份输入是 HTML 吗」。只看开始标签会把作答里的不等号当标签（`x<y 而且 y>z`
@@ -80,27 +249,17 @@ def _wrap_plain(src: str) -> str:
     return "".join("<p>%s</p>" % _escape(b, quote=False) for b in blocks if b)
 
 
-class _Walker(HTMLParser):
-    """同一次遍历里同时攒出纯文本和位置映射（两套抽取器口径不一是最根本的坑）。"""
+class _Walker(_Located):
+    """同一次遍历里同时攒出纯文本和位置映射（两套抽取器口径不一是最根本的坑）。
+
+    只喂消毒后的 HTML：script / style 之类已经不存在，这里只管文字与块边界。
+    """
 
     def __init__(self, src: str):
-        HTMLParser.__init__(self, convert_charrefs=False)
-        self.src = src
+        _Located.__init__(self, src)
         self.chars = []                      # type: List[str]
         self.spans = []                      # type: List[Tuple[int, int]]
-        self._line_head = [0]
-        for i, ch in enumerate(src):
-            if ch == "\n":
-                self._line_head.append(i + 1)
-        self._skip_depth = 0
         self._break_pending = False
-
-    # -- 位置：由解析器当前偏移换算，不用 raw.find(data) 猜
-    def _offset(self) -> int:
-        line, col = self.getpos()
-        if line - 1 < len(self._line_head):
-            return self._line_head[line - 1] + col
-        return len(self.src)
 
     def _push(self, ch: str, a: int, b: int) -> None:
         if self._break_pending:
@@ -116,25 +275,16 @@ class _Walker(HTMLParser):
             self._break_pending = True
 
     def handle_starttag(self, tag, attrs):
-        if tag.lower() in _SKIP_TAGS:
-            self._skip_depth += 1
-            return
         self._mark_boundary(tag)
 
     def handle_startendtag(self, tag, attrs):
-        if tag.lower() in _SKIP_TAGS:
-            return
         self._mark_boundary(tag)
 
     def handle_endtag(self, tag):
-        if tag.lower() in _SKIP_TAGS:
-            if self._skip_depth:
-                self._skip_depth -= 1
-            return
         self._mark_boundary(tag)
 
     def handle_data(self, data):
-        if self._skip_depth or not data:
+        if not data:
             return
         if not data.strip() and (self._break_pending or not self.chars):
             return                            # 标签之间的排版空白，丢掉
@@ -143,12 +293,7 @@ class _Walker(HTMLParser):
             self._push(ch, base + i, base + i + 1)
 
     def _handle_ref(self, prefix_len: int, name: str) -> None:
-        if self._skip_depth:
-            return
-        start = self._offset()
-        end = start + prefix_len + len(name)
-        if self.src[end:end + 1] == ";":
-            end += 1
+        start, end = self._ref_span(prefix_len, name)
         raw = self.src[start:end]
         decoded = _unescape(raw)
         if len(decoded) != 1:
@@ -168,10 +313,15 @@ class _Walker(HTMLParser):
 
 
 def extract(html: str) -> Extraction:
-    """把 HTML / Markdown / 纯文本抽成纯文本 + 位置映射。"""
+    """把 HTML / Markdown / 纯文本消毒后抽成纯文本 + 位置映射。
+
+    返回的 `html` 是消毒后的 HTML，spans 以它为准。先消毒再抽取，所以定位与
+    splice 面对的永远是一份没有伪造标记、标签配平、属性值不含尖括号的文本。
+    """
     src = (html or "").replace("\r\n", "\n").replace("\r", "\n")
     if not _HTML_MARKER.search(src):
         src = _wrap_plain(src)
+    src = sanitize(src)
     walker = _Walker(src)
     walker.feed(src)
     walker.close()
@@ -273,83 +423,9 @@ def _anchor_ends(hay: str, needle: str) -> Tuple[Optional[Tuple[int, int]], bool
     return None, False
 
 
-_TAG_IN_SPAN = re.compile(r"<[a-zA-Z/!][^<>]*>")
-
-# 正文是不可信输入：它自带的 <mark> 与 class / data-an 长得和引擎钉上去的一模一样，
-# 混进左栏就是一条伪造的批注（还会被页面的联动高亮认领）。定位之前先剥掉：标签脱壳
-# 留字，属性整个删掉，其余部分一个字节都不动。
-_ENGINE_ATTRS = frozenset(("class", "data-an"))
-# 顺序扫一个标签里的属性。从属性区开头一路往后吃，引号里的 `class=foo` 会被当成
-# 上一个属性的值吞掉，不会被当成属性名；属性名整串比对，`data-answer` 与 `classic`
-# 这种以禁词开头的合法属性名也不会被啃掉半截。
-_ATTR_SCAN = re.compile(r"""\s+([^\s"'>/=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]*))?""")
-
-
-class _Stripper(HTMLParser):
-    """找出正文里伪造的 mark 标签、以及 class / data-an 属性各自占的字节区间。
-
-    用解析器定位标签而不是用正则：属性值里塞一个 `<` 或 `>`（`<mark title="<" …>`）
-    就能把 `<[^<>]*>` 这类正则骗过去，伪造的批注照样落地。解析器认得引号。
-    """
-
-    def __init__(self, src: str):
-        HTMLParser.__init__(self, convert_charrefs=False)
-        self.src = src
-        self.cuts = []                       # type: List[Tuple[int, int]]
-        self._line_head = [0]
-        for i, ch in enumerate(src):
-            if ch == "\n":
-                self._line_head.append(i + 1)
-
-    def _offset(self) -> int:
-        line, col = self.getpos()
-        if line - 1 < len(self._line_head):
-            return self._line_head[line - 1] + col
-        return len(self.src)
-
-    def handle_starttag(self, tag, attrs):
-        start = self._offset()
-        raw = self.get_starttag_text() or ""
-        if not raw or not raw.startswith("<"):
-            return
-        if tag.lower() == "mark":
-            self.cuts.append((start, start + len(raw)))   # 整个标签拿掉，里面的字留着
-            return
-        present = set(k.lower() for k, _ in attrs)
-        for m in _ATTR_SCAN.finditer(raw, 1 + len(tag)):
-            name = m.group(1).lower()
-            if name in _ENGINE_ATTRS and name in present:
-                self.cuts.append((start + m.start(), start + m.end()))
-
-    def handle_startendtag(self, tag, attrs):
-        self.handle_starttag(tag, attrs)
-
-    def handle_endtag(self, tag):
-        if tag.lower() != "mark":
-            return
-        start = self._offset()
-        closed = self.src.find(">", start)
-        self.cuts.append((start, closed + 1 if closed >= 0 else len(self.src)))
-
-
-def _strip_forged(html: str) -> str:
-    """剥掉正文里已有的 mark 标签与 class / data-an 属性，其余字节一个不动。"""
-    src = html or ""
-    if not _HTML_MARKER.search(src):
-        return src                            # 纯文本里的尖括号不是标签，别乱动
-    stripper = _Stripper(src)
-    stripper.feed(src)
-    stripper.close()
-    if not stripper.cuts:
-        return src
-    out, cursor = [], 0
-    for a, b in sorted(stripper.cuts):
-        if a < cursor:                        # 兜底：区间重叠时以先到的为准
-            continue
-        out.append(src[cursor:a])
-        cursor = b
-    out.append(src[cursor:])
-    return "".join(out)
+# 只在消毒后的 HTML 上用：消毒器保证标签外没有裸的 < >、属性值里也没有，所以
+# 「< 到下一个 >」就恰好是一个标签，不会被属性值骗过去。
+_TAG_IN_SPAN = re.compile(r"</?[a-z][^<>]*>")
 
 
 def _mark_segments(html: str, start: int, end: int) -> List[Tuple[int, int]]:
@@ -460,11 +536,11 @@ def _reduce_overlap(items: List[dict]) -> List[dict]:
 def annotate(html: str, marks: List[dict], *, levels=LEVELS) -> AnnotateResult:
     """按引文把批注钉回原文；钉不上的条目照样入列，只是没有锚点。
 
+    正文先经 `extract` 消毒再定位，所以输出 HTML 去掉引擎 mark 后逐字等于
+    `sanitize(输入)`；输出里的 mark / class / data-an 只可能来自引擎。
     跨行内标签的引文按文本节点切段，一条批注可能对应多个共用 `data-an` 的 mark。
-    正文里已有的 mark 与 class / data-an 会先被剥掉，所以带伪造批注的输入，
-    输出 HTML 不会与输入逐字相同 —— 这正是要的。
     """
-    ex = extract(_strip_forged(html))
+    ex = extract(html)
     items = []
     for raw in (marks or []):
         item = _prepare(raw if isinstance(raw, dict) else {}, levels)
@@ -493,95 +569,6 @@ def annotate(html: str, marks: List[dict], *, levels=LEVELS) -> AnnotateResult:
 
 
 # ---------------------------------------------------------------- 渲染
-
-# 左栏的正文来自学生作答与老师题干（题干允许含 HTML），是不可信输入；判题卡又是
-# 老师在本地双击打开的文件。所以进页面前过一遍白名单：只留排版需要的标签，属性只
-# 留 class 与 data-an，script / style / iframe 这类连内容一起丢，其余标签脱掉外壳
-# 但保留里面的文字。
-_SAFE_TAGS = frozenset((
-    "p", "div", "ul", "ol", "li", "table", "thead", "tbody", "tr", "td", "th",
-    "h1", "h2", "h3", "h4", "h5", "h6", "br", "blockquote", "pre", "code",
-    "b", "strong", "i", "em", "u", "s", "mark",
-))
-_SAFE_ATTRS = frozenset(("class", "data-an"))
-_VOID_TAGS = frozenset((
-    "br", "img", "hr", "input", "meta", "link", "source", "col",
-    "area", "base", "wbr", "embed", "param", "track", "frame",
-))
-_DROP_SUBTREE = frozenset((
-    "script", "style", "iframe", "object", "embed", "applet", "noscript",
-    "template", "svg", "math", "form", "select", "textarea", "button",
-    "canvas", "audio", "video", "frame", "frameset",
-))
-
-
-class _Cleaner(HTMLParser):
-    """白名单过滤器：重新拼一份只含安全标签的 HTML，顺手把标签配平。"""
-
-    def __init__(self):
-        HTMLParser.__init__(self, convert_charrefs=True)
-        self.out = []                        # type: List[str]
-        self.open_tags = []                  # type: List[str]
-        self._drop_tag = None
-        self._drop_depth = 0
-
-    def handle_starttag(self, tag, attrs):
-        name = tag.lower()
-        if self._drop_depth:
-            if name == self._drop_tag:
-                self._drop_depth += 1
-            return
-        if name in _DROP_SUBTREE:
-            if name in _VOID_TAGS:
-                return                       # 空元素等不到闭合标签，进了 drop 模式就再也出不来
-            self._drop_tag, self._drop_depth = name, 1
-            return
-        if name not in _SAFE_TAGS:
-            return                           # 脱掉外壳，里面的文字照留
-        kept = "".join(' %s="%s"' % (k.lower(), _escape(v or "", quote=True))
-                       for k, v in attrs if k.lower() in _SAFE_ATTRS)
-        self.out.append("<%s%s>" % (name, kept))
-        if name not in _VOID_TAGS:
-            self.open_tags.append(name)
-
-    def handle_startendtag(self, tag, attrs):
-        self.handle_starttag(tag, attrs)
-        if tag.lower() not in _VOID_TAGS:
-            self.handle_endtag(tag)
-
-    def handle_endtag(self, tag):
-        name = tag.lower()
-        if self._drop_depth:
-            if name == self._drop_tag:
-                self._drop_depth -= 1
-                if not self._drop_depth:
-                    self._drop_tag = None
-            return
-        if name in _VOID_TAGS or name not in self.open_tags:
-            return                           # 野生的闭合标签，丢掉
-        while self.open_tags:
-            top = self.open_tags.pop()
-            self.out.append("</%s>" % top)
-            if top == name:
-                break
-
-    def handle_data(self, data):
-        if not self._drop_depth and data:
-            self.out.append(_escape(data, quote=False))
-
-    def result(self) -> str:
-        while self.open_tags:                # 没闭合的补上，免得撑破整页布局
-            self.out.append("</%s>" % self.open_tags.pop())
-        return "".join(self.out)
-
-
-def sanitize(html: str) -> str:
-    """把一段 HTML 过成只含白名单标签与 class / data-an 属性的安全版本。"""
-    cleaner = _Cleaner()
-    cleaner.feed(html or "")
-    cleaner.close()
-    return cleaner.result()
-
 
 LEVEL_LABEL = {"major": "要紧", "minor": "次要", "remark": "提示"}
 
@@ -652,7 +639,8 @@ def _mark_card(m: dict) -> str:
 def render_page(title: str, original_html: str, result: AnnotateResult, meta: dict) -> str:
     """自包含单页报告：左栏原文带 mark，右栏按编号列条目，无任何外链。
 
-    左栏的正文先过 `sanitize`：正文是不可信输入，页面却要在老师本地直接打开。
+    `result.html` 已经是「消毒后的正文 + 引擎 mark」，直接进左栏；这里不再二次
+    消毒 —— 消毒会把 mark 一并剥掉。没有 `result.html` 时退回 `extract` 的消毒产物。
     """
     anchored = [m for m in result.marks if m.get("anchored")]
     missed = [m for m in result.marks if not m.get("anchored")]
@@ -672,7 +660,7 @@ def render_page(title: str, original_html: str, result: AnnotateResult, meta: di
             "<p class=\"foot\">批注由脚本锚定，未定位条目脚本不擅自摆放。</p>"
             "</div><script>%s</script></body></html>\n"
             % (_escape(title), _PAGE_CSS, _escape(title), "　·　".join(b for b in bits if b),
-               sanitize(result.html or _strip_forged(original_html or "")), "".join(side), _PAGE_JS))
+               result.html or extract(original_html or "").html, "".join(side), _PAGE_JS))
 
 
 # ---------------------------------------------------------------- 自测
@@ -719,6 +707,7 @@ def t_extract_invariant():
         # 跨块判定全靠这条：零宽区间只可能是块级分隔符
         bad = [i for i, (a, b) in enumerate(one.spans) if a == b and one.text[i] != "\n"]
         check(not bad, "%r：零宽区间只应出现在块级分隔符上，实际还有下标 %r" % (src, bad))
+        check(sanitize(one.html) == one.html, "%r：Extraction.html 应已是消毒后的形态（再消毒恒等）" % src)
 
 
 def t_entity_anchor():
@@ -780,7 +769,7 @@ def t_disjoint_order():
     order = [m["quote"] for m in res.marks]
     check(order == ["alpha", "beta", "gamma"], "条目应按文档顺序重排，实际 %r" % order)
     stripped = re.sub(r"</?mark[^>]*>", "", res.html)
-    check(stripped == src, "去掉 mark 后应与原文逐字相同，实际 %r" % stripped)
+    check(stripped == sanitize(src) == src, "去掉 mark 后应与消毒后的原文逐字相同，实际 %r" % stripped)
 
 
 def t_unanchored_kept():
@@ -880,7 +869,7 @@ def t_inline_tag_span():
             '<mark class="an an-major" data-an="1">fox</mark> jumps over</p>')
     check(res.html == want, "应按文本节点切成两段且标签配平，实际 %r" % res.html)
     check(res.html.count('data-an="1"') == 2, "两段应共用一个编号，实际 %r" % res.html)
-    check(re.sub(r"</?mark[^>]*>", "", res.html) == src, "去掉 mark 后应与原文逐字相同")
+    check(re.sub(r"</?mark[^>]*>", "", res.html) == sanitize(src) == src, "去掉 mark 后应与消毒后的原文逐字相同")
     inside = annotate(src, [{"quote": "quick brown", "level": "minor", "note": "乙"}])
     check(inside.html.count("<mark") == 1, "整段落在行内标签内的引文只应有一段，实际 %r" % inside.html)
 
@@ -918,18 +907,61 @@ def t_sanitize_void_drop():
     check("二" in nested, "嵌套的丢弃项闭合后应恢复，实际 %r" % nested)
 
 
+def t_sanitize_identity():
+    """消毒对干净输入恒等、对任何输入幂等；引擎标记与危险属性对任何来源一律剥掉。"""
+    benign = (SRC_TWO_BLOCKS, "<p>甲&nbsp;乙</p>", "<p>x&NotEqualTilde;y</p>", "<p>&foo; &#65; &#x4e2d;</p>",
+              "<p>甲</p>\n  <p>乙</p>", "<table><tr><td>甲</td><td>乙</td></tr></table>",
+              '<p title="alpha">alpha</p>', "<p>alpha beta</p>", "<p>他说“机会成本”——是最重要的概念。</p>",
+              "<p>The <b>quick brown</b> fox jumps over</p>", '<p data-answer="42" id="q1">题目</p>',
+              '<p title="use class=foo here">说明</p>', "<p>甲<br>乙</p>", "<p>甲<br/>乙</p>",
+              '<p title="a&amp;b"  id="x">双空格</p>', '<ol start="3"><li>甲</li></ol>',
+              "<p>若 a&lt;b 且 b&gt;c 则 a&lt;c</p>", '<td colspan="2" aria-label="甲">乙</td>')
+    for src in benign:
+        check(sanitize(src) == src, "干净输入消毒后应恒等：%r → %r" % (src, sanitize(src)))
+    # 脏输入过一遍就是干净输入
+    for src, want in (('<P TITLE="x" onclick="alert(1)">甲</P>', '<p title="x">甲</p>'),
+                      ("<p title='单引号' style=\"color:red\">甲</p>", '<p title="单引号">甲</p>'),
+                      ('<p title="a<b">甲</p>', '<p title="a&lt;b">甲</p>'),
+                      ('<p title=裸值>甲</p>', '<p title="裸值">甲</p>'),
+                      ('<p classic="x" hidden>古典</p>', "<p>古典</p>"),
+                      ('<p data-"x="1">甲</p>', "<p>甲</p>"),
+                      ("<p>a & b < c</p>", "<p>a &amp; b &lt; c</p>"),
+                      ("<p>A&foo B&nbsp乙&notin;&notin</p>", "<p>A&amp;foo B\xa0乙&notin;\xacin</p>"),
+                      ('<span class="x">甲</span><a href="javascript:alert(1)">乙</a>', "甲乙"),
+                      ("<p>甲<b>乙", "<p>甲<b>乙</b></p>"),
+                      ('<p class="an an-major" data-an="9">甲 <mark class="an" data-an="9">乙</mark></p>', "<p>甲 乙</p>"),
+                      ('<p class="an an-major"data-answer="q1">题目</p>', '<p data-answer="q1">题目</p>')):
+        got = sanitize(src)
+        check(got == want, "%r 应消毒成 %r，实际 %r" % (src, want, got))
+        check(sanitize(got) == got, "%r 消毒后再消毒应恒等，实际 %r" % (src, sanitize(got)))
+
+
+def t_attr_value_angle():
+    """属性值里的尖括号：消毒后已转义，mark 不可能被 splice 进属性值。"""
+    for src, esc in (('<p>alpha <b title=">">beta</b> gamma</p>', "&gt;"),
+                     ('<p>alpha <b title="<">beta</b> gamma</p>', "&lt;")):
+        res = annotate(src, [{"quote": "alpha beta gamma", "level": "major", "note": "甲"}])
+        want = ('<p><mark class="an an-major" data-an="1">alpha</mark> <b title="%s">'
+                '<mark class="an an-major" data-an="1">beta</mark></b> '
+                '<mark class="an an-major" data-an="1">gamma</mark></p>' % esc)
+        check(res.html == want, "%r：应三段共用一个编号且 title 值转义保留，实际 %r" % (src, res.html))
+        check(re.search(r"<[^<>]*<", res.html) is None, "标签内部不该再出现 <，实际 %r" % res.html)
+        check(res.marks[0]["anchored"] is True, "跨属性值含尖括号的行内标签应能锚定")
+
+
 def t_forged_mark():
-    """正文自带的 mark 与 class / data-an 是伪造的批注，进引擎前先剥掉。"""
+    """正文自带的 mark 与 class / data-an 是伪造的批注：消毒在批注前就把它们剥掉。"""
     src = ('<p>正文 <mark class="an an-major" data-an="1">伪造的批注</mark> 结束</p>'
            '<p class="an an-minor" data-an="2" title="留着">整段伪造</p>')
     res = annotate(src, [{"quote": "结束", "level": "remark", "note": "真批注"}])
     check("伪造的批注" in res.html and "整段伪造" in res.html, "伪造标记里的文字应作为普通文本留下，实际 %r" % res.html)
     check("an-major" not in res.html and "an-minor" not in res.html, "伪造的 class 应被剥掉，实际 %r" % res.html)
-    check('title="留着"' in res.html, "class 以外的属性不该被误删，实际 %r" % res.html)
+    check('title="留着"' in res.html, "排版属性不该被误删，实际 %r" % res.html)
     ids = re.findall(r'data-an="(\d+)"', res.html)
     anchored = [m for m in res.marks if m["anchored"]]
     check(len(anchored) == 1, "真批注应锚定成功，实际 %r" % res.marks)
     check(ids == ["1"], "页面上只应有引擎自己钉的那些段，实际 %r" % ids)
+    check(re.sub(r"</?mark[^>]*>", "", res.html) == sanitize(src), "去掉引擎 mark 后应逐字等于消毒后的输入")
     page = render_page("伪造样例", src, res, {})
     check('data-an="2"' not in page, "伪造的编号不该出现在页面上")
     # 页面自带的样式表里有 mark.an-major 选择器，所以要按属性形态查
@@ -938,44 +970,41 @@ def t_forged_mark():
     check("伪造的批注" in page, "伪造标记里的文字应作为普通文本出现在页面上")
 
 
-def t_strip_forged_exact():
-    """剥伪造批注：绕不过去（属性值里塞尖括号），也不许啃到合法属性。"""
-    # 合法属性逐字不变 —— 名字以禁词开头、或值里写着 class= 的都不许动
-    for clean in ('<p data-answer="42" id="q1">题目</p>',
-                  '<p classic="x">古典</p>',
-                  '<p title="use class=foo here">说明</p>',
-                  '<p title="alpha">alpha</p>',
-                  '<p title="a<b">尖括号在属性值里</p>',
-                  "<p>甲</p><p>乙</p>"):
-        got = annotate(clean, []).html
-        check(got == clean, "干净输入应逐字不变：%r → %r" % (clean, got))
-
-    # 属性值里塞尖括号绕不过去
-    for forged in ('<p>正文 <mark title="<" class="an an-major" data-an="97">伪造满分</mark> 结束</p>',
-                   '<p>正文 <b title=">" class="an an-major" data-an="99">伪造满分</b> 结束</p>'):
-        res = annotate(forged, [{"quote": "结束", "level": "remark", "note": "真批注"}])
+def t_forged_no_bypass():
+    """伪造批注绕不过消毒：属性紧贴引号 / 斜杠、值里塞尖括号、大小写与引号形态换着写都一样。"""
+    forged = ('<p>正文 <b x="y"class="an an-major"data-an="97">伪造满分</b> 结束</p>',
+              '<p id="a"/class="an an-major" data-an="98">正文 伪造满分 结束</p>',
+              '<p>正文 <mark title="<" class="an an-major" data-an="97">伪造满分</mark> 结束</p>',
+              '<p>正文 <b title=">" class="an an-major" data-an="99">伪造满分</b> 结束</p>',
+              '<p>正文 <MARK CLASS="an an-major" DATA-AN="96">伪造满分</MARK> 结束</p>',
+              "<p>正文 <b class='an an-major' data-an='95'>伪造满分</b> 结束</p>",
+              "<p>正文 <b class=an data-an=94>伪造满分</b> 结束</p>",
+              '<p class="an an-major"data-an="93"data-answer="q1">正文 伪造满分 结束</p>',
+              '<p>正文 <mark/>伪造满分<mark class="an an-major" data-an="92"/> 结束</p>')
+    for src in forged:
+        res = annotate(src, [{"quote": "结束", "level": "remark", "note": "真批注"}])
         ids = re.findall(r'data-an="(\d+)"', res.html)
-        check(ids == ["1"], "%r：只应剩引擎自己的编号，实际 %r（%r）" % (forged, ids, res.html))
-        check("an-major" not in res.html, "%r：伪造的等级 class 应被剥掉，实际 %r" % (forged, res.html))
-        check("伪造满分" in res.html, "%r：伪造标记里的文字应作为普通文本留下" % forged)
-        page = render_page("伪造样例", forged, res, {})
-        check('data-an="97"' not in page and 'data-an="99"' not in page, "伪造的编号不该出现在页面上")
+        check(ids == ["1"], "%r：只应剩引擎自己的编号，实际 %r（%r）" % (src, ids, res.html))
+        check("an-major" not in res.html, "%r：伪造的等级 class 应被剥掉，实际 %r" % (src, res.html))
+        check("伪造满分" in res.html, "%r：伪造标记里的文字应作为普通文本留下，实际 %r" % (src, res.html))
+        check(res.html.count("<mark") == 1 and res.html.count("</mark>") == 1,
+              "%r：只应有引擎钉的那一个 mark，实际 %r" % (src, res.html))
+        check(re.sub(r"</?mark[^>]*>", "", res.html) == sanitize(src),
+              "%r：去掉引擎 mark 后应逐字等于消毒后的输入，实际 %r" % (src, res.html))
+        page = render_page("伪造样例", src, res, {})
+        check(re.findall(r'data-an="(\d+)"', page) == ["1", "1"], "页面上的 data-an 只应是引擎钉的与右栏卡片各一个")
         check(page.count('<mark class="an an-remark" data-an="1">') == 1, "页面上只应有引擎钉的那一个 mark")
         check("伪造满分" in page, "伪造标记里的文字应作为普通文本出现在页面上")
-
-    # 截断的伪造标签：解析器不认它，剥不掉也不许它变成真属性落到左栏上
+    # 过度剥除不许毁标签名：被剥属性紧邻的下一个属性要完整留下
+    res = annotate('<p class="an an-major"data-answer="q1">题目</p>', [])
+    check(res.html == '<p data-answer="q1">题目</p>', "被剥属性的邻居应完整保留，实际 %r" % res.html)
+    # 截断的伪造标签：整个丢掉，不许在左栏变成真属性
     for broken in ('<p>甲</p><mark class="an an-major" data-an="5"',
                    '<p>甲</p><mark class="an an-major" data-an="5" 未闭合'):
         page = render_page("截断", broken, annotate(broken, []), {})
         doc = page.split('<div class="doc">')[1].split('</div><div class="side">')[0]
-        check('data-an="5"' not in doc, "截断的伪造标签不该在左栏变成真属性，实际 %r" % doc)
+        check(re.search(r'<[^<>]*data-an="5"', doc) is None, "截断的伪造标签不该在左栏变成真属性，实际 %r" % doc)
         check("甲" in doc, "截断输入的正文应保留，实际 %r" % doc)
-
-    # 引号形态换着写也一样剥
-    for forged, want in (('<p data-an=5 class=x id=z>甲</p>', '<p id=z>甲</p>'),
-                         ("<p class='an' data-an='7'>乙</p>", "<p>乙</p>")):
-        got = annotate(forged, []).html
-        check(got == want, "%r 应剥成 %r，实际 %r" % (forged, want, got))
 
 
 def t_banned_words_selfscan():
@@ -1032,8 +1061,10 @@ SELFTESTS = (
     t_inline_tag_span,
     t_plain_text_with_angles,
     t_sanitize_void_drop,
+    t_sanitize_identity,
+    t_attr_value_angle,
     t_forged_mark,
-    t_strip_forged_exact,
+    t_forged_no_bypass,
     t_banned_words_selfscan,
 )
 
