@@ -569,15 +569,16 @@ def validate_grade(job, answer_text, payload):
 
 # ---------------------------------------------------------------- 盖章与新鲜度
 
-def current_hashes(job):
-    return {"rubric": sha256_text(read_text_or_empty(job.path(RUBRIC_FILE))),
-            "question": sha256_text(read_text_or_empty(job.path(QUESTION_FILE))),
-            "oracle_full": sha256_text(read_text_or_empty(job.path(ORACLE_FULL))),
-            "oracle_broken": sha256_text(read_text_or_empty(job.path(ORACLE_BROKEN)))}
-
-
+# 盖章要记的材料：评分标准、题干，以及 oracle/ 下的全部三份 —— 残缺版「缺哪几条」
+# 也算材料，改了它等于换了一份 oracle，盖章必须跟着作废。
 HASH_LABEL = {"rubric": RUBRIC_FILE, "question": QUESTION_FILE,
-              "oracle_full": ORACLE_FULL, "oracle_broken": ORACLE_BROKEN}
+              "oracle_full": ORACLE_FULL, "oracle_broken": ORACLE_BROKEN,
+              "oracle_missing": ORACLE_BROKEN_LIST}
+
+
+def current_hashes(job):
+    return dict((key, sha256_text(read_text_or_empty(job.path(name))))
+                for key, name in HASH_LABEL.items())
 
 
 def stamp_state(job):
@@ -593,7 +594,7 @@ def stamp_state(job):
 
 
 def require_stamp(job):
-    """grade 的前置：盖章在、且四份材料一个字没变过。"""
+    """grade 的前置：盖章在、且五份材料一个字没变过。"""
     stamp, changed = stamp_state(job)
     if stamp is None:
         raise UsageError("还没有 oracle 盖章，不许开批。请先让 Agent 交 "
@@ -641,6 +642,33 @@ def payload_of(record):
                           "quote": c.get("quote", "")} for c in record.get("criteria") or []],
             "marks": [{"quote": m.get("quote", ""), "level": m.get("level", anchor.DEFAULT_LEVEL),
                        "note": m.get("note", "")} for m in record.get("marks") or []]}
+
+
+def anchor_drift(record, redone):
+    """落盘的锚定结论必须等于重新锚定算出来的那一份。
+
+    `anchored_ratio` 与每条 `marks[].anchored` 是汇总与导出直接读的字段，闸门却只用
+    重算值判阈值 —— 不对账的话，把落盘 JSON 里的 anchored 手改成 false / true，
+    复核照样 0 ERROR，假数字一路混进汇总与脱敏证据。
+    """
+    problems = []
+    want_ratio = round(redone.get("anchored_ratio") or 0.0, 3)
+    got_ratio = round(record.get("anchored_ratio") or 0.0, 3)
+    if want_ratio != got_ratio:
+        problems.append("落盘的 anchored_ratio 是 %s，重新锚定算出来是 %s；"
+                        "这个字段汇总与导出直接读，不许手改" % (got_ratio, want_ratio))
+    stored = [m for m in record.get("marks") or [] if isinstance(m, dict)]
+    fresh = redone.get("marks") or []
+    if len(stored) != len(fresh):
+        problems.append("落盘 %d 条批注，重新锚定得到 %d 条" % (len(stored), len(fresh)))
+        return problems
+    bad = [i for i, (a, b) in enumerate(zip(stored, fresh), 1)
+           if bool(a.get("anchored")) != bool(b.get("anchored"))]
+    if bad:
+        problems.append("第 %s 条批注落盘的 anchored 与重新锚定的结论对不上；"
+                        "批注锚没锚上由引擎说了算，不许手改"
+                        % "、".join(str(i) for i in bad))
+    return problems
 
 
 def render_card(job, record, answer_text):
@@ -939,7 +967,7 @@ def cmd_oracle_check(args):
     print("oracle 通过：满分范例 %d / %d 分条条命中；残缺版 %d / %d 分，缺的%s都判了 miss 或 partial"
           % (full["points"], job.max, broken["points"], job.max,
              "、".join("「%s」" % n for n in missing)))
-    print("已盖章：%s（记下 %s 四份材料的哈希，任一改动都作废）"
+    print("已盖章：%s（记下 %s 五份材料的哈希，任一改动都作废）"
           % (STAMP_FILE, "、".join(HASH_LABEL[k] for k in sorted(HASH_LABEL))))
     return 0
 
@@ -1052,7 +1080,7 @@ def cmd_check(args):
     elif changed:
         add("ERROR", "oracle 盖章已作废（stale）：%s 在盖章之后改过" % "、".join(changed))
     else:
-        add("OK", "oracle 盖章有效（%s 四份材料一个字没变）" % "、".join(sorted(HASH_LABEL.values())))
+        add("OK", "oracle 盖章有效（%s 五份材料一个字没变）" % "、".join(sorted(HASH_LABEL.values())))
 
     records = passed_records(job)
     fresh = []
@@ -1063,7 +1091,8 @@ def cmd_check(args):
             add("ERROR", "结果 %s 已过期（stale）：%s，请重跑 grade" % (student, stale[student]))
             continue
         answer_text = job.answer_of(student)
-        errors, cautions, _ = validate_grade(job, answer_text, payload_of(record))
+        errors, cautions, redone = validate_grade(job, answer_text, payload_of(record))
+        errors = errors + anchor_drift(record, redone)
         for line in errors:
             add("ERROR", "结果 %s：%s" % (student, line))
         for line in cautions:

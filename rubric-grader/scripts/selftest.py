@@ -354,7 +354,7 @@ def t_oracle_pass_stamps(root):
     check(rc == 0, "合格的 oracle 应退出 0，rc=%d\n%s" % (rc, out))
     stamp = load(os.path.join(job, ".stamps", "oracle.json"))
     hashes = stamp.get("hashes", {})
-    check(len(hashes) == 4, "盖章应含四个哈希，实际 %r" % sorted(hashes))
+    check(len(hashes) == 5, "盖章应含五个哈希（含 oracle/broken.json），实际 %r" % sorted(hashes))
     for key, value in hashes.items():
         check(isinstance(value, str) and len(value) == 64, "%s 的哈希应是 64 位十六进制，实际 %r" % (key, value))
 
@@ -413,6 +413,60 @@ def t_grade_evidence_unanchored(root):
     check("定义准确" in out, "应指名是哪一条的引文锚不到，实际输出：\n%s" % out)
     check("2" in out, "应给出降级后应得的分数 2，实际输出：\n%s" % out)
     check(not os.path.exists(os.path.join(job, "results", "a01.json")), "拒收时不该写 results")
+
+
+def t_grade_evidence_warn_half(root):
+    """锚不到但分数没变：降为 miss、记 evidence_unanchored、给 WARN，但放行。
+
+    结论呼应值 1 分，partial 取整是 0、miss 也是 0，所以降级不影响总分 ——
+    §3.4 第 3 条说这种情况只记不拦，拦的是「因此分数变了」那半边。
+    """
+    job = make_job(root, "gate-evidence-02")
+    submit(job, "a01", body_for(job, "a01", points=4, verdicts=("hit", "hit", "partial"),
+                                quotes={"结论呼应": "作答里根本没有这句话甲乙丙"}))
+    rc, out = say("grade", job, "a01")
+    check(rc == 0, "锚不到但分数没变应放行，rc=%d\n%s" % (rc, out))
+    check("WARN" in out and "结论呼应" in out, "应给出降级的提醒并指名条目，实际输出：\n%s" % out)
+
+    record = load(os.path.join(job, "results", "a01.json"))
+    end = [c for c in record["criteria"] if c["name"] == "结论呼应"][0]
+    check(end["verdict"] == "miss", "锚不到的条目应降为 miss，实际 %r" % end["verdict"])
+    check(end["evidence_unanchored"] is True, "应记 evidence_unanchored，实际 %r" % end)
+    check(record["points"] == 4, "分数不该被脚本改动，实际 %r" % record["points"])
+    check(any("锚不回" in c for c in record.get("cautions") or []),
+          "提醒应记进落盘结果，实际 %r" % record.get("cautions"))
+
+
+def t_grade_partial_halves(root):
+    """partial 拿一半向下取整：2 分的条目给 1 分，1 分的条目给 0 分。"""
+    job = make_job(root, "gate-partial-01")
+    # 定义准确 hit 2 + 例子具体 partial 2//2=1 + 结论呼应 partial 1//2=0 = 3
+    submit(job, "a01", body_for(job, "a01", points=3, verdicts=("hit", "partial", "partial")))
+    rc, out = say("grade", job, "a01")
+    check(rc == 0, "partial 按向下取整算出 3 分应通过，rc=%d\n%s" % (rc, out))
+    record = load(os.path.join(job, "results", "a01.json"))
+    check([c["verdict"] for c in record["criteria"]] == ["hit", "partial", "partial"],
+          "partial 判定应原样落盘，实际 %r" % record["criteria"])
+
+    submit(job, "a01", body_for(job, "a01", points=4, verdicts=("hit", "partial", "partial")))
+    rc, out = say("grade", job, "a01")
+    check(rc == 1, "把 partial 当满分算（填 4）应退出 1，rc=%d\n%s" % (rc, out))
+    check("3" in out, "应算出正确的 3 分并写在原因里，实际输出：\n%s" % out)
+
+
+def t_grade_unscored_criteria(root):
+    """条目表不带分值时，points 只受 0 <= points <= max 约束。"""
+    job = make_job(root, "gate-unscored-01",
+                   criteria=[{"name": "定义准确"}, {"name": "例子具体"}, {"name": "结论呼应"}])
+    submit(job, "a01", body_for(job, "a01", points=5, verdicts=("hit", "hit", "miss")))
+    rc, out = say("grade", job, "a01")
+    check(rc == 0, "不带分值时 hit/hit/miss 填 5 分也应放行，rc=%d\n%s" % (rc, out))
+    check(load(os.path.join(job, "results", "a01.json"))["points"] == 5, "应原样记 5 分")
+
+    submit(job, "a01", body_for(job, "a01", points=6, verdicts=("hit", "hit", "miss")))
+    rc, out = say("grade", job, "a01")
+    check(rc == 1, "超过满分仍应退出 1，rc=%d\n%s" % (rc, out))
+    check("5" in out, "应写清满分是 5，实际输出：\n%s" % out)
 
 
 def t_grade_marks_cap(root):
@@ -595,6 +649,55 @@ def t_stale_after_rubric_edit(root):
     check(rc == 2, "盖章作废后 grade 应退出 2，rc=%d\n%s" % (rc, out))
 
 
+def t_check_anchor_tamper(root):
+    """手改落盘的锚定结论骗不过复核：汇总与导出读的就是这两个字段。"""
+    job = make_job(root, "tamper-01")
+    pass_one(job, "a01")
+    path = os.path.join(job, "results", "a01.json")
+    clean = read(path)
+    rc, out = say("check", job)
+    check(rc == 0, "没动过的题批次应 0 ERROR，rc=%d\n%s" % (rc, out))
+
+    record = json.loads(clean)
+    record["anchored_ratio"] = 0.11
+    write_json(path, record)
+    rc, out = say("check", job)
+    check(rc == 1, "改了 anchored_ratio 应退出 1，rc=%d\n%s" % (rc, out))
+    check("anchored_ratio" in out, "应指名是 anchored_ratio 对不上，实际输出：\n%s" % out)
+    check("0.11" in out and "1.0" in out, "应同时报出落盘值与重算值，实际输出：\n%s" % out)
+
+    record = json.loads(clean)
+    for mark in record["marks"]:
+        mark["anchored"] = False
+    write_json(path, record)
+    rc, out = say("check", job)
+    check(rc == 1, "把每条 anchored 改成 false 应退出 1，rc=%d\n%s" % (rc, out))
+    check("anchored" in out, "应指名是 anchored 对不上，实际输出：\n%s" % out)
+
+    write(path, clean)
+    rc, out = say("check", job)
+    check(rc == 0, "改回去之后应重新 0 ERROR，rc=%d\n%s" % (rc, out))
+
+
+def t_stale_after_missing_list_edit(root):
+    """改了残缺版「缺哪几条」等于换了一份 oracle：盖章必须跟着作废。"""
+    job = make_job(root, "stale-02")
+    pass_one(job, "a01")
+    rc, out = say("check", job)
+    check(rc == 0, "改动之前 check 应 0 ERROR，rc=%d\n%s" % (rc, out))
+
+    write_json(os.path.join(job, "oracle", "broken.json"), {"missing": ["结论呼应"]})
+    rc, out = say("check", job)
+    check(rc == 1, "改了 broken.json 之后 check 应退出 1，rc=%d\n%s" % (rc, out))
+    check("broken.json" in out, "应指名是 oracle/broken.json 改过，实际输出：\n%s" % out)
+    check("作废" in out or "stale" in out, "应报盖章作废，实际输出：\n%s" % out)
+
+    rc, out = say("grade", job, "a01")
+    check(rc == 2, "盖章作废后 grade 应退出 2，rc=%d\n%s" % (rc, out))
+    rc, out = say("summary", job)
+    check(rc == 1, "盖章作废后 summary 应退出 1，rc=%d\n%s" % (rc, out))
+
+
 def t_check_examples(root):
     """仓库里的示例题批次必须 0 ERROR（示例还没做出来时跳过）。"""
     base = os.path.join(SKILL_DIR, "examples")
@@ -659,6 +762,9 @@ SELFTESTS = (
     t_grade_unknown_key,
     t_grade_points_consistency,
     t_grade_evidence_unanchored,
+    t_grade_evidence_warn_half,
+    t_grade_partial_halves,
+    t_grade_unscored_criteria,
     t_grade_marks_cap,
     t_grade_anchor_ratio,
     t_grade_summary_len,
@@ -668,6 +774,8 @@ SELFTESTS = (
     t_similarity_gate,
     t_baselines_zero,
     t_stale_after_rubric_edit,
+    t_stale_after_missing_list_edit,
+    t_check_anchor_tamper,
     t_check_examples,
     t_export_no_text,
     t_banned_scan,
