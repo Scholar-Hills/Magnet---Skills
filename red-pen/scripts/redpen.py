@@ -65,6 +65,8 @@ LANGS = ("zh", "en")
 # ---- docx：只读 word/document.xml 里的文字段落
 WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 WORD_MAIN = "word/document.xml"
+# 同一段内容的两种画法：新版画在 mc:Choice 里，旧版在 mc:Fallback 里兜底。两边都读等于复制一份。
+MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
 
 
 class UsageError(Exception):
@@ -240,8 +242,44 @@ def read_brief(ws):
 
 # ---------------------------------------------------------------- 取稿
 
+def _docx_paragraphs(node):
+    """按文档顺序产出顶层 w:p；文本框里的 w:p 归外层那一段，mc:Fallback 整棵跳过。
+
+    文本框的 w:p 嵌在外层 w:p 之下，若把它当顶层段落再枚举一遍，同一句话就会
+    被读第二次；而 Choice 与 Fallback 各带一份同样的文字，两边都读又乘二。
+    所以遇到 w:p 就产出它、不再往里钻，遇到 mc:Fallback 直接绕过整棵子树。
+    """
+    for child in node:
+        if child.tag == MC_FALLBACK:
+            continue
+        if child.tag == WORD_NS + "p":
+            yield child
+        else:
+            for found in _docx_paragraphs(child):
+                yield found
+
+
+def _docx_line(node, parts):
+    """一段里的文字：w:t 拼起来，w:br / w:cr 换行，w:tab 制表；Fallback 同样绕过。"""
+    for child in node:
+        if child.tag == MC_FALLBACK:
+            continue
+        if child.tag == WORD_NS + "t":
+            parts.append(child.text or "")
+        elif child.tag in (WORD_NS + "br", WORD_NS + "cr"):
+            parts.append("\n")
+        elif child.tag == WORD_NS + "tab":
+            parts.append("\t")
+        _docx_line(child, parts)
+    return parts
+
+
 def docx_text(path):
-    """docx 只用 zipfile + xml：读 word/document.xml，按 w:p 切段。图片与文本框不支持。"""
+    """docx 只用 zipfile + xml：读 word/document.xml，按 w:p 切段。
+
+    表格按段落读出来（只丢表结构，文字一个不少）；文本框里的文字按它在正文里
+    锚着的位置读一次。图片与修订痕迹不支持。稿子的字一个不改、也一个不重复。
+    """
     try:
         with zipfile.ZipFile(path) as pack:
             raw = pack.read(WORD_MAIN)
@@ -256,20 +294,12 @@ def docx_text(path):
     except ET.ParseError as e:
         raise UsageError("这个 .docx 的正文 XML 解析失败：%s（%s）" % (_shown(path), e))
     blocks = []
-    for para in root.iter(WORD_NS + "p"):
-        parts = []
-        for node in para.iter():
-            if node.tag == WORD_NS + "t":
-                parts.append(node.text or "")
-            elif node.tag in (WORD_NS + "br", WORD_NS + "cr"):
-                parts.append("\n")
-            elif node.tag == WORD_NS + "tab":
-                parts.append("\t")
-        line = "".join(parts).strip()
+    for para in _docx_paragraphs(root):
+        line = "".join(_docx_line(para, [])).strip()
         if line:
             blocks.append(line)
     if not blocks:
-        raise UsageError("这个 .docx 里没读到文字段落（图片、文本框、批注都不支持）：%s" % _shown(path))
+        raise UsageError("这个 .docx 里没读到文字段落（整篇都是图片的稿子读不了）：%s" % _shown(path))
     return "\n\n".join(blocks) + "\n"
 
 
@@ -797,7 +827,8 @@ def cmd_doctor(args):
     else:
         print("  [提示] 工作区根目录 %s 下还没有 %s/，init 时会建" % (_shown(root), DRAFTS_DIR))
     print("提示：脚本只读写工作区，不联网，不执行稿子里的任何代码；稿子本身一个字都不改。")
-    print("      docx 只读 %s 里的文字段落，图片、文本框、修订痕迹都不支持。" % WORD_MAIN)
+    print("      docx 只读 %s 里的文字段落：表格按段落读出、丢表结构，文本框的文字按位置读一次；"
+          "图片与修订痕迹不支持。" % WORD_MAIN)
     return worst
 
 

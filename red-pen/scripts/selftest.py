@@ -20,6 +20,7 @@ SKILL_DIR = os.path.dirname(HERE)
 REDPEN = os.path.join(HERE, "redpen.py")
 PY = sys.executable
 SLUG = "weekly-note"
+MARKS_NAME = "marks.json"
 
 
 class Failed(Exception):
@@ -97,13 +98,16 @@ DOCX_CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 DOCX_MAIN_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
 
 
-def make_docx(path, text):
-    """现造一个最小 docx：只有 word/document.xml 里的若干 w:p 是真材料。"""
-    body = "".join(
-        "<w:p><w:r><w:t>%s</w:t></w:r></w:p>" % block
-        for block in [b.strip() for b in text.split("\n\n")] if block)
+DOCX_MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+DOCX_DRAW_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+
+def pack_docx(path, body):
+    """把一段 w:body 的内容封成 docx；三个部件都摆齐，是一个真能打开的包。"""
     document = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                '<w:document xmlns:w="%s"><w:body>%s</w:body></w:document>' % (DOCX_MAIN_NS, body))
+                '<w:document xmlns:w="%s" xmlns:mc="%s" xmlns:wp="%s">'
+                '<w:body>%s</w:body></w:document>'
+                % (DOCX_MAIN_NS, DOCX_MC_NS, DOCX_DRAW_NS, body))
     rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="%s">'
             '<Relationship Id="rId1" Type="%s" Target="word/document.xml"/>'
@@ -119,6 +123,38 @@ def make_docx(path, text):
         z.writestr("_rels/.rels", rels)
         z.writestr("word/document.xml", document)
     return path
+
+
+def make_docx(path, text):
+    """最小 docx：按空行切段，每段一个 w:p。"""
+    return pack_docx(path, "".join(
+        "<w:p><w:r><w:t>%s</w:t></w:r></w:p>" % block
+        for block in [b.strip() for b in text.split("\n\n")] if block))
+
+
+def make_rich_docx(path):
+    """带表格与文本框的 docx：文本框那句同时写进 mc:Choice 与 mc:Fallback。
+
+    这是 Word 真实的画法 —— 新版渲染器读 Choice，旧版读 Fallback，两份内容一样。
+    朴素地 `root.iter(w:p)` 会把同一句读四次（外层段落吞一次 Choice 一次 Fallback，
+    嵌套的两个 w:p 又各被当成顶层段落枚举一次）。
+    """
+    textbox = ("<w:txbxContent><w:p><w:r><w:t>文本框里的话</w:t></w:r></w:p></w:txbxContent>")
+    body = (
+        "<w:p><w:r><w:t>普通段落一</w:t></w:r></w:p>"
+        "<w:tbl><w:tr>"
+        "<w:tc><w:p><w:r><w:t>表格单元一</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:p><w:r><w:t>表格单元二</w:t></w:r></w:p></w:tc>"
+        "</w:tr></w:tbl>"
+        "<w:p><w:r><mc:AlternateContent>"
+        "<mc:Choice Requires=\"wps\"><w:drawing><wp:anchor>%s</wp:anchor></w:drawing></mc:Choice>"
+        "<mc:Fallback><w:pict>%s</w:pict></mc:Fallback>"
+        "</mc:AlternateContent></w:r></w:p>"
+        "<w:p><w:r><w:t>普通段落二</w:t></w:r></w:p>" % (textbox, textbox))
+    return pack_docx(path, body)
+
+
+RICH_DOCX_WANT = "普通段落一\n\n表格单元一\n\n表格单元二\n\n文本框里的话\n\n普通段落二\n"
 
 
 # ---------------------------------------------------------------- 跑脚本
@@ -220,6 +256,32 @@ def t_init_from_txt_md_html_docx():
         check(needle in pack["draft_text"], "%s 抽出的纯文本应含「%s」，实际开头：%r"
               % (name, needle, pack["draft_text"][:60]))
         check("<" not in pack["draft_text"], "纯文本里不应残留标签：%r" % pack["draft_text"][:80])
+
+
+def t_docx_table_and_textbox():
+    """带表格与文本框的 docx：每句只读一次，顺序照旧。
+
+    Word 会把文本框的内容同时写进 mc:Choice 与 mc:Fallback，还把它的 w:p 嵌在外层
+    w:p 之下。朴素地枚举 w:p 会让同一句话出现四次（其中两次还糊在一起）——
+    这个 Skill 的立身之本是稿子一个字都不改，输入侧静默失真同样不能接受。
+    """
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    src = make_rich_docx(os.path.join(root, "rich.docx"))
+    rc, out, err = run(root, "init", SLUG, "--from", src)
+    check(rc == 0, "init 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+    landed = read(os.path.join(ws_dir(root), "draft.txt"))
+    check(landed == RICH_DOCX_WANT, "docx 抽出来的正文应当逐字等于期望：\n实际 %r\n期望 %r"
+          % (landed, RICH_DOCX_WANT))
+    for once in ("普通段落一", "表格单元一", "表格单元二", "文本框里的话", "普通段落二"):
+        check(landed.count(once) == 1, "「%s」应当只出现一次，实际 %d 次：%r"
+              % (once, landed.count(once), landed))
+    order = [landed.index(x) for x in ("普通段落一", "表格单元一", "表格单元二",
+                                       "文本框里的话", "普通段落二")]
+    check(order == sorted(order), "段落顺序应当与文档一致，实际下标 %r" % order)
+    pack = context(root)
+    check(pack["draft_text"] == RICH_DOCX_WANT.strip().replace("\n\n", "\n"),
+          "纯文本也应当每句一次：%r" % pack["draft_text"])
 
 
 def t_context_hash_includes_brief():
@@ -419,6 +481,56 @@ def t_check_examples():
         check("[ERROR]" not in out, "示例 %s 不该有 ERROR：\n%s" % (os.path.basename(d), out))
 
 
+def t_check_tamper():
+    """check 是发布闸靠的那道门：干净工作区 0 ERROR，动过手脚的一律逮住。"""
+    root = workspace()
+    rc, out, err = submit(root, marks_ok())
+    check(rc == 0, "review 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0 and "[ERROR]" not in out, "干净工作区应当 0 ERROR 退出 0，rc=%d\n%s" % (rc, out))
+
+    page = os.path.join(ws_dir(root), "review.html")
+    keep_page = read(page)
+    write(page, keep_page + "<!-- 手改一笔 -->")
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1 and "[ERROR]" in out, "手改红笔页应当被逮住，rc=%d\n%s" % (rc, out))
+    check("红笔页" in out, "应当说明是红笔页被改过：\n%s" % out)
+    write(page, keep_page)
+
+    record = os.path.join(ws_dir(root), MARKS_NAME)
+    keep_record = read(record)
+    tampered = json.loads(keep_record)
+    tampered["marks"][0]["note"] = "偷偷把这条批语换掉，红笔页就对不上了。"
+    write(record, json.dumps(tampered, ensure_ascii=False, indent=2) + "\n")
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1 and "[ERROR]" in out, "手改 marks.json 应当被逮住，rc=%d\n%s" % (rc, out))
+
+    # 只有「重新过一遍闸门」这条路能逮住的篡改：hash 不进红笔页，页面比对看不见它
+    forged = json.loads(keep_record)
+    forged["context_hash"] = "0" * 64
+    write(record, json.dumps(forged, ensure_ascii=False, indent=2) + "\n")
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1 and "context_hash" in out, "假的 context_hash 应当被逮住，rc=%d\n%s" % (rc, out))
+    write(record, keep_record)
+
+    draft = os.path.join(ws_dir(root), "draft.md")
+    keep_draft = read(draft)
+    write(draft, keep_draft + "\n偷偷加的一段，批注都还挂在旧稿上。\n")
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1 and "[ERROR]" in out, "改过稿子应当被逮住，rc=%d\n%s" % (rc, out))
+    check("哈希" in out, "应当说明是稿子的哈希对不上：\n%s" % out)
+    write(draft, keep_draft)
+
+    os.remove(page)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1 and "缺红笔页" in out, "删掉红笔页应当被逮住，rc=%d\n%s" % (rc, out))
+
+    rc, out, err = run(root, "review", SLUG)
+    check(rc == 0, "重跑 review 应当把工作区恢复成合规状态，rc=%d\n%s%s" % (rc, out, err))
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0 and "[ERROR]" not in out, "重跑 review 之后应当重新 0 ERROR：\n%s" % out)
+
+
 def t_export_no_text():
     """导出件只有哈希与计数，一个字的正文都不带。"""
     root = workspace()
@@ -453,6 +565,7 @@ def t_banned_scan():
 
 SELFTESTS = (
     t_init_from_txt_md_html_docx,
+    t_docx_table_and_textbox,
     t_context_hash_includes_brief,
     t_marks_count_bounds,
     t_fix_rules,
@@ -464,6 +577,7 @@ SELFTESTS = (
     t_stats_diff,
     t_review_html,
     t_check_examples,
+    t_check_tamper,
     t_export_no_text,
     t_banned_scan,
 )
