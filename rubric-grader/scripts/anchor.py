@@ -59,8 +59,19 @@ _BLOCK_TAGS = frozenset((
     "br", "blockquote", "pre", "td", "th",
 ))
 _SKIP_TAGS = frozenset(("script", "style"))
-_LOOKS_LIKE_TAG = re.compile(r"</?[a-zA-Z][^<>]*>")
 _BLANK_LINE = re.compile(r"\n[ \t]*\n")
+
+# 判「这份输入是 HTML 吗」。只看开始标签会把作答里的不等号当标签（`x<y 而且 y>z`
+# 里的 `<y 而且 y>` 就长得像 `<y ...>`），后面整段被当标签吞掉。所以要求出现
+# 三者之一：已知标签的闭合标签、已知的空标签、或明确自闭合的标签 —— 真的 HTML
+# 一定会有其中之一，而散文里的不等号不会。
+_HTML_MARKER = re.compile(
+    r"</\s*(?:p|div|li|ul|ol|table|thead|tbody|tr|td|th|h[1-6]|blockquote|pre|code"
+    r"|b|strong|i|em|u|s|span|a|mark|section|article|figure|figcaption|dl|dt|dd"
+    r"|sub|sup|small|font|center|main|header|footer|nav|aside|body|html)\s*>"
+    r"|<\s*(?:br|hr|img|input|meta|link|col|source|wbr)\b[^<>]*>"
+    r"|<\s*[a-zA-Z][a-zA-Z0-9]*\b[^<>]*/\s*>",
+    re.IGNORECASE)
 
 
 def _wrap_plain(src: str) -> str:
@@ -159,7 +170,7 @@ class _Walker(HTMLParser):
 def extract(html: str) -> Extraction:
     """把 HTML / Markdown / 纯文本抽成纯文本 + 位置映射。"""
     src = (html or "").replace("\r\n", "\n").replace("\r", "\n")
-    if not _LOOKS_LIKE_TAG.search(src):
+    if not _HTML_MARKER.search(src):
         src = _wrap_plain(src)
     walker = _Walker(src)
     walker.feed(src)
@@ -262,26 +273,33 @@ def _anchor_ends(hay: str, needle: str) -> Tuple[Optional[Tuple[int, int]], bool
     return None, False
 
 
-_TAG_IN_SPAN = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)[^>]*?(/?)>")
-_VOID_TAGS = frozenset((
-    "br", "img", "hr", "input", "meta", "link", "source", "col",
-    "area", "base", "wbr", "embed", "param", "track",
-))
+_TAG_IN_SPAN = re.compile(r"<[a-zA-Z/!][^<>]*>")
 
 
-def _tags_balanced(fragment: str) -> bool:
-    """区间内的标签必须自成一体：半截的行内标签 splice 出来就是畸形嵌套。"""
-    stack = []
-    for m in _TAG_IN_SPAN.finditer(fragment):
-        closing, name, selfclosing = m.group(1), m.group(2).lower(), m.group(3)
-        if selfclosing or name in _VOID_TAGS:
-            continue
-        if closing:
-            if not stack or stack.pop() != name:
-                return False
-        else:
-            stack.append(name)
-    return not stack
+def _mark_segments(html: str, start: int, end: int) -> List[Tuple[int, int]]:
+    """把区间按标签切成若干段纯文本。
+
+    一条批注可能跨过 `<b>` 这样的行内标签。整段包一个 mark 会 splice 出畸形嵌套
+    （mark 在标签里开、在外面关），所以改成每个文本节点各包一个 mark，同一条批注
+    的这几个 mark 共用一个 `data-an`。标签本身不进 mark。
+    """
+    segments = []
+    cursor = start
+    for m in _TAG_IN_SPAN.finditer(html, start, end):
+        if m.start() > cursor:
+            segments.append((cursor, m.start()))
+        cursor = max(cursor, m.end())
+    if end > cursor:
+        segments.append((cursor, end))
+    trimmed = []
+    for a, b in segments:
+        while a < b and html[a] in " \t\n":     # 不给零散的空白描下划线
+            a += 1
+        while b > a and html[b - 1] in " \t\n":
+            b -= 1
+        if b > a:
+            trimmed.append((a, b))
+    return trimmed
 
 
 def _to_html_span(ex: Extraction, back: List[int], lo: int, hi: int,
@@ -296,8 +314,6 @@ def _to_html_span(ex: Extraction, back: List[int], lo: int, hi: int,
     start, end = ex.spans[first][0], ex.spans[last][1]
     if end <= start:
         return None
-    if not _tags_balanced(ex.html[start:end]):
-        return None                           # 同一个理由：只跨一半的行内标签也不锚
     return start, end, partial
 
 
@@ -366,7 +382,10 @@ def _reduce_overlap(items: List[dict]) -> List[dict]:
 
 
 def annotate(html: str, marks: List[dict], *, levels=LEVELS) -> AnnotateResult:
-    """按引文把批注钉回原文；钉不上的条目照样入列，只是没有锚点。"""
+    """按引文把批注钉回原文；钉不上的条目照样入列，只是没有锚点。
+
+    跨行内标签的引文按文本节点切段，一条批注可能对应多个共用 `data-an` 的 mark。
+    """
     ex = extract(html)
     items = []
     for raw in (marks or []):
@@ -381,11 +400,14 @@ def annotate(html: str, marks: List[dict], *, levels=LEVELS) -> AnnotateResult:
     for i, m in enumerate(ordered, 1):
         m["id"] = i
 
-    out = ex.html
-    for m in sorted(kept, key=lambda m: m["start"], reverse=True):
+    pieces = []
+    for m in kept:
         opening = '<mark class="an an-%s" data-an="%d">' % (m["level"], m["id"])
-        out = out[:m["end"]] + "</mark>" + out[m["end"]:]
-        out = out[:m["start"]] + opening + out[m["start"]:]
+        pieces.extend((a, b, opening) for a, b in _mark_segments(ex.html, m["start"], m["end"]))
+    out = ex.html
+    for a, b, opening in sorted(pieces, reverse=True):   # 从后往前才不打乱前面的偏移
+        out = out[:b] + "</mark>" + out[b:]
+        out = out[:a] + opening + out[a:]
 
     tidy = [dict((k, m[k]) for k in _MARK_KEYS if k in m) for m in ordered]
     ratio = round(len(kept) / len(ordered), 4) if ordered else 0.0
@@ -393,6 +415,93 @@ def annotate(html: str, marks: List[dict], *, levels=LEVELS) -> AnnotateResult:
 
 
 # ---------------------------------------------------------------- 渲染
+
+# 左栏的正文来自学生作答与老师题干（题干允许含 HTML），是不可信输入；判题卡又是
+# 老师在本地双击打开的文件。所以进页面前过一遍白名单：只留排版需要的标签，属性只
+# 留 class 与 data-an，script / style / iframe 这类连内容一起丢，其余标签脱掉外壳
+# 但保留里面的文字。
+_SAFE_TAGS = frozenset((
+    "p", "div", "ul", "ol", "li", "table", "thead", "tbody", "tr", "td", "th",
+    "h1", "h2", "h3", "h4", "h5", "h6", "br", "blockquote", "pre", "code",
+    "b", "strong", "i", "em", "u", "s", "mark",
+))
+_SAFE_ATTRS = frozenset(("class", "data-an"))
+_VOID_TAGS = frozenset((
+    "br", "img", "hr", "input", "meta", "link", "source", "col",
+    "area", "base", "wbr", "embed", "param", "track",
+))
+_DROP_SUBTREE = frozenset((
+    "script", "style", "iframe", "object", "embed", "applet", "noscript",
+    "template", "svg", "math", "form", "select", "textarea", "button",
+    "canvas", "audio", "video", "frame", "frameset",
+))
+
+
+class _Cleaner(HTMLParser):
+    """白名单过滤器：重新拼一份只含安全标签的 HTML，顺手把标签配平。"""
+
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=True)
+        self.out = []                        # type: List[str]
+        self.open_tags = []                  # type: List[str]
+        self._drop_tag = None
+        self._drop_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        name = tag.lower()
+        if self._drop_depth:
+            if name == self._drop_tag:
+                self._drop_depth += 1
+            return
+        if name in _DROP_SUBTREE:
+            self._drop_tag, self._drop_depth = name, 1
+            return
+        if name not in _SAFE_TAGS:
+            return                           # 脱掉外壳，里面的文字照留
+        kept = "".join(' %s="%s"' % (k.lower(), _escape(v or "", quote=True))
+                       for k, v in attrs if k.lower() in _SAFE_ATTRS)
+        self.out.append("<%s%s>" % (name, kept))
+        if name not in _VOID_TAGS:
+            self.open_tags.append(name)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in _VOID_TAGS:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        name = tag.lower()
+        if self._drop_depth:
+            if name == self._drop_tag:
+                self._drop_depth -= 1
+                if not self._drop_depth:
+                    self._drop_tag = None
+            return
+        if name in _VOID_TAGS or name not in self.open_tags:
+            return                           # 野生的闭合标签，丢掉
+        while self.open_tags:
+            top = self.open_tags.pop()
+            self.out.append("</%s>" % top)
+            if top == name:
+                break
+
+    def handle_data(self, data):
+        if not self._drop_depth and data:
+            self.out.append(_escape(data, quote=False))
+
+    def result(self) -> str:
+        while self.open_tags:                # 没闭合的补上，免得撑破整页布局
+            self.out.append("</%s>" % self.open_tags.pop())
+        return "".join(self.out)
+
+
+def sanitize(html: str) -> str:
+    """把一段 HTML 过成只含白名单标签与 class / data-an 属性的安全版本。"""
+    cleaner = _Cleaner()
+    cleaner.feed(html or "")
+    cleaner.close()
+    return cleaner.result()
+
 
 LEVEL_LABEL = {"major": "要紧", "minor": "次要", "remark": "提示"}
 
@@ -461,7 +570,10 @@ def _mark_card(m: dict) -> str:
 
 
 def render_page(title: str, original_html: str, result: AnnotateResult, meta: dict) -> str:
-    """自包含单页报告：左栏原文带 mark，右栏按编号列条目，无任何外链。"""
+    """自包含单页报告：左栏原文带 mark，右栏按编号列条目，无任何外链。
+
+    左栏的正文先过 `sanitize`：正文是不可信输入，页面却要在老师本地直接打开。
+    """
     anchored = [m for m in result.marks if m.get("anchored")]
     missed = [m for m in result.marks if not m.get("anchored")]
     bits = ["　·　".join("%s：%s" % (_escape(str(k)), _escape(str(v))) for k, v in (meta or {}).items())]
@@ -480,7 +592,7 @@ def render_page(title: str, original_html: str, result: AnnotateResult, meta: di
             "<p class=\"foot\">批注由脚本锚定，未定位条目脚本不擅自摆放。</p>"
             "</div><script>%s</script></body></html>\n"
             % (_escape(title), _PAGE_CSS, _escape(title), "　·　".join(b for b in bits if b),
-               result.html or _escape(original_html or ""), "".join(side), _PAGE_JS))
+               sanitize(result.html or original_html or ""), "".join(side), _PAGE_JS))
 
 
 # ---------------------------------------------------------------- 自测
@@ -658,17 +770,55 @@ def t_render_selfcontained():
         check('data-an="%d"' % m["id"] in page, "第 %d 条应出现在页面上" % m["id"])
     check("合成样例批注" in page, "标题应出现在页面上")
 
+    # 正文是不可信输入（作答与题干都允许含 HTML），页面却要在老师本地直接打开
+    hostile = ('<p>alpha beta</p><script>alert(1)</script>'
+               '<img src="http://evil.example/x.png">'
+               '<p onclick="alert(2)">gamma</p>'
+               '<iframe src="https://evil.example"></iframe>'
+               '<a href="javascript:alert(3)">链接文字</a>'
+               '<div style="background:url(http://evil.example/y)">delta</div>')
+    bad_res = annotate(hostile, [{"quote": "alpha beta", "level": "major", "note": "甲"}])
+    bad_page = render_page("敌意样例", hostile, bad_res, {})
+    for danger in ("alert(", "http://", "https://", "onclick", "<img", "<iframe",
+                   "javascript:", "style=", "<a ", "evil.example"):
+        check(danger not in bad_page, "敌意正文里的 %s 不该出现在页面上" % danger)
+    check(bad_page.count("<script") == 1, "页面只应有自己那一段内联脚本，实际 %d 段" % bad_page.count("<script"))
+    for text in ("alpha beta", "gamma", "delta", "链接文字"):
+        check(text in bad_page, "正文文字 %s 应当留下来" % text)
+    check('data-an="1"' in bad_page, "敌意正文里的批注仍应锚定并出现在页面上")
+
 
 def t_inline_tag_span():
-    """行内标签只跨一半的引文不锚定 —— 否则 splice 出来是畸形嵌套。"""
-    src = "<p>The <b>quick brown</b> fox jumps</p>"
+    """跨行内标签的引文按文本节点切段，多个 mark 共用同一个 data-an。"""
+    src = "<p>The <b>quick brown</b> fox jumps over</p>"
     ex = extract(src)
-    check(locate(ex, "brown fox") is None, "跨行内标签边界的引文应拒绝锚定，实际 %r" % (locate(ex, "brown fox"),))
-    check(locate(ex, "quick brown") is not None, "整段落在行内标签内的引文应能锚定")
-    res = annotate(src, [{"quote": "The quick brown fox", "level": "major", "note": "甲"}])
-    check(res.html.count("<mark") == 1, "包住完整行内标签的引文应能锚定，实际 %r" % res.html)
-    check("<b>quick brown</b>" in res.html, "行内标签应原样保留，实际 %r" % res.html)
+    for quote in ("quick brown fox", "The quick", "brown fox"):
+        check(locate(ex, quote) is not None, "跨行内标签的引文应能锚定，%r 却是 None" % quote)
+    res = annotate(src, [{"quote": "quick brown fox", "level": "major", "note": "甲"}])
+    check(res.marks[0]["anchored"] is True, "跨行内标签的条目应记为已锚定")
+    want = ('<p>The <b><mark class="an an-major" data-an="1">quick brown</mark></b> '
+            '<mark class="an an-major" data-an="1">fox</mark> jumps over</p>')
+    check(res.html == want, "应按文本节点切成两段且标签配平，实际 %r" % res.html)
+    check(res.html.count('data-an="1"') == 2, "两段应共用一个编号，实际 %r" % res.html)
     check(re.sub(r"</?mark[^>]*>", "", res.html) == src, "去掉 mark 后应与原文逐字相同")
+    inside = annotate(src, [{"quote": "quick brown", "level": "minor", "note": "乙"}])
+    check(inside.html.count("<mark") == 1, "整段落在行内标签内的引文只应有一段，实际 %r" % inside.html)
+
+
+def t_plain_text_with_angles():
+    """作答里的不等号不是标签：判 HTML 的判据不许把纯文本吞掉。"""
+    src = "如果 x<y 而且 y>z，那么 x<z。\n\n第二段结论。"
+    ex = extract(src)
+    check(ex.text == "如果 x<y 而且 y>z，那么 x<z。\n第二段结论。", "纯文本不得被吞，实际 %r" % ex.text)
+    hit = locate(ex, "那么 x<z")
+    check(hit is not None, "含不等号的引文应能锚定")
+    check(ex.html[hit[0]:hit[1]] == "那么 x&lt;z", "纯文本进 HTML 时应转义，实际 %r" % ex.html[hit[0]:hit[1]])
+    res = annotate(src, [{"quote": "x<y 而且 y>z", "level": "minor", "note": "乙"}])
+    check("&lt;y" in res.html, "角括号应已转义，实际 %r" % res.html)
+    check(res.marks[0]["anchored"] is True, "含不等号的引文应锚定成功")
+    # 单字母变量名恰好撞上标签名也不许误判
+    plain = "若 a<b and b>c 则 a<c"
+    check(extract(plain).text == plain, "撞上标签名的不等号也不得被吞，实际 %r" % extract(plain).text)
 
 
 def t_banned_words_selfscan():
@@ -723,6 +873,7 @@ SELFTESTS = (
     t_markdown_plain_input,
     t_render_selfcontained,
     t_inline_tag_span,
+    t_plain_text_with_angles,
     t_banned_words_selfscan,
 )
 
