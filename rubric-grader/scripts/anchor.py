@@ -278,20 +278,78 @@ _TAG_IN_SPAN = re.compile(r"<[a-zA-Z/!][^<>]*>")
 # 正文是不可信输入：它自带的 <mark> 与 class / data-an 长得和引擎钉上去的一模一样，
 # 混进左栏就是一条伪造的批注（还会被页面的联动高亮认领）。定位之前先剥掉：标签脱壳
 # 留字，属性整个删掉，其余部分一个字节都不动。
-_FORGED_MARK = re.compile(r"</?mark\b[^<>]*>", re.IGNORECASE)
-_ANY_START_TAG = re.compile(r"<[a-zA-Z][^<>]*>")
-_ENGINE_ATTR = re.compile(
-    r"""\s+(?:class|data-an)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+))?""",
-    re.IGNORECASE)
+_ENGINE_ATTRS = frozenset(("class", "data-an"))
+# 顺序扫一个标签里的属性。从属性区开头一路往后吃，引号里的 `class=foo` 会被当成
+# 上一个属性的值吞掉，不会被当成属性名；属性名整串比对，`data-answer` 与 `classic`
+# 这种以禁词开头的合法属性名也不会被啃掉半截。
+_ATTR_SCAN = re.compile(r"""\s+([^\s"'>/=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]*))?""")
+
+
+class _Stripper(HTMLParser):
+    """找出正文里伪造的 mark 标签、以及 class / data-an 属性各自占的字节区间。
+
+    用解析器定位标签而不是用正则：属性值里塞一个 `<` 或 `>`（`<mark title="<" …>`）
+    就能把 `<[^<>]*>` 这类正则骗过去，伪造的批注照样落地。解析器认得引号。
+    """
+
+    def __init__(self, src: str):
+        HTMLParser.__init__(self, convert_charrefs=False)
+        self.src = src
+        self.cuts = []                       # type: List[Tuple[int, int]]
+        self._line_head = [0]
+        for i, ch in enumerate(src):
+            if ch == "\n":
+                self._line_head.append(i + 1)
+
+    def _offset(self) -> int:
+        line, col = self.getpos()
+        if line - 1 < len(self._line_head):
+            return self._line_head[line - 1] + col
+        return len(self.src)
+
+    def handle_starttag(self, tag, attrs):
+        start = self._offset()
+        raw = self.get_starttag_text() or ""
+        if not raw or not raw.startswith("<"):
+            return
+        if tag.lower() == "mark":
+            self.cuts.append((start, start + len(raw)))   # 整个标签拿掉，里面的字留着
+            return
+        present = set(k.lower() for k, _ in attrs)
+        for m in _ATTR_SCAN.finditer(raw, 1 + len(tag)):
+            name = m.group(1).lower()
+            if name in _ENGINE_ATTRS and name in present:
+                self.cuts.append((start + m.start(), start + m.end()))
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        if tag.lower() != "mark":
+            return
+        start = self._offset()
+        closed = self.src.find(">", start)
+        self.cuts.append((start, closed + 1 if closed >= 0 else len(self.src)))
 
 
 def _strip_forged(html: str) -> str:
-    """剥掉正文里已有的 mark 标签与 class / data-an 属性。"""
+    """剥掉正文里已有的 mark 标签与 class / data-an 属性，其余字节一个不动。"""
     src = html or ""
     if not _HTML_MARKER.search(src):
         return src                            # 纯文本里的尖括号不是标签，别乱动
-    return _ANY_START_TAG.sub(lambda m: _ENGINE_ATTR.sub("", m.group(0)),
-                              _FORGED_MARK.sub("", src))
+    stripper = _Stripper(src)
+    stripper.feed(src)
+    stripper.close()
+    if not stripper.cuts:
+        return src
+    out, cursor = [], 0
+    for a, b in sorted(stripper.cuts):
+        if a < cursor:                        # 兜底：区间重叠时以先到的为准
+            continue
+        out.append(src[cursor:a])
+        cursor = b
+    out.append(src[cursor:])
+    return "".join(out)
 
 
 def _mark_segments(html: str, start: int, end: int) -> List[Tuple[int, int]]:
@@ -880,6 +938,46 @@ def t_forged_mark():
     check("伪造的批注" in page, "伪造标记里的文字应作为普通文本出现在页面上")
 
 
+def t_strip_forged_exact():
+    """剥伪造批注：绕不过去（属性值里塞尖括号），也不许啃到合法属性。"""
+    # 合法属性逐字不变 —— 名字以禁词开头、或值里写着 class= 的都不许动
+    for clean in ('<p data-answer="42" id="q1">题目</p>',
+                  '<p classic="x">古典</p>',
+                  '<p title="use class=foo here">说明</p>',
+                  '<p title="alpha">alpha</p>',
+                  '<p title="a<b">尖括号在属性值里</p>',
+                  "<p>甲</p><p>乙</p>"):
+        got = annotate(clean, []).html
+        check(got == clean, "干净输入应逐字不变：%r → %r" % (clean, got))
+
+    # 属性值里塞尖括号绕不过去
+    for forged in ('<p>正文 <mark title="<" class="an an-major" data-an="97">伪造满分</mark> 结束</p>',
+                   '<p>正文 <b title=">" class="an an-major" data-an="99">伪造满分</b> 结束</p>'):
+        res = annotate(forged, [{"quote": "结束", "level": "remark", "note": "真批注"}])
+        ids = re.findall(r'data-an="(\d+)"', res.html)
+        check(ids == ["1"], "%r：只应剩引擎自己的编号，实际 %r（%r）" % (forged, ids, res.html))
+        check("an-major" not in res.html, "%r：伪造的等级 class 应被剥掉，实际 %r" % (forged, res.html))
+        check("伪造满分" in res.html, "%r：伪造标记里的文字应作为普通文本留下" % forged)
+        page = render_page("伪造样例", forged, res, {})
+        check('data-an="97"' not in page and 'data-an="99"' not in page, "伪造的编号不该出现在页面上")
+        check(page.count('<mark class="an an-remark" data-an="1">') == 1, "页面上只应有引擎钉的那一个 mark")
+        check("伪造满分" in page, "伪造标记里的文字应作为普通文本出现在页面上")
+
+    # 截断的伪造标签：解析器不认它，剥不掉也不许它变成真属性落到左栏上
+    for broken in ('<p>甲</p><mark class="an an-major" data-an="5"',
+                   '<p>甲</p><mark class="an an-major" data-an="5" 未闭合'):
+        page = render_page("截断", broken, annotate(broken, []), {})
+        doc = page.split('<div class="doc">')[1].split('</div><div class="side">')[0]
+        check('data-an="5"' not in doc, "截断的伪造标签不该在左栏变成真属性，实际 %r" % doc)
+        check("甲" in doc, "截断输入的正文应保留，实际 %r" % doc)
+
+    # 引号形态换着写也一样剥
+    for forged, want in (('<p data-an=5 class=x id=z>甲</p>', '<p id=z>甲</p>'),
+                         ("<p class='an' data-an='7'>乙</p>", "<p>乙</p>")):
+        got = annotate(forged, []).html
+        check(got == want, "%r 应剥成 %r，实际 %r" % (forged, want, got))
+
+
 def t_banned_words_selfscan():
     """引擎自身不含禁用词；同时正向验证扫描器确实会报。"""
     import os
@@ -935,6 +1033,7 @@ SELFTESTS = (
     t_plain_text_with_angles,
     t_sanitize_void_drop,
     t_forged_mark,
+    t_strip_forged_exact,
     t_banned_words_selfscan,
 )
 
