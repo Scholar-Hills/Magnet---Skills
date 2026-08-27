@@ -275,6 +275,24 @@ def _anchor_ends(hay: str, needle: str) -> Tuple[Optional[Tuple[int, int]], bool
 
 _TAG_IN_SPAN = re.compile(r"<[a-zA-Z/!][^<>]*>")
 
+# 正文是不可信输入：它自带的 <mark> 与 class / data-an 长得和引擎钉上去的一模一样，
+# 混进左栏就是一条伪造的批注（还会被页面的联动高亮认领）。定位之前先剥掉：标签脱壳
+# 留字，属性整个删掉，其余部分一个字节都不动。
+_FORGED_MARK = re.compile(r"</?mark\b[^<>]*>", re.IGNORECASE)
+_ANY_START_TAG = re.compile(r"<[a-zA-Z][^<>]*>")
+_ENGINE_ATTR = re.compile(
+    r"""\s+(?:class|data-an)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+))?""",
+    re.IGNORECASE)
+
+
+def _strip_forged(html: str) -> str:
+    """剥掉正文里已有的 mark 标签与 class / data-an 属性。"""
+    src = html or ""
+    if not _HTML_MARKER.search(src):
+        return src                            # 纯文本里的尖括号不是标签，别乱动
+    return _ANY_START_TAG.sub(lambda m: _ENGINE_ATTR.sub("", m.group(0)),
+                              _FORGED_MARK.sub("", src))
+
 
 def _mark_segments(html: str, start: int, end: int) -> List[Tuple[int, int]]:
     """把区间按标签切成若干段纯文本。
@@ -385,8 +403,10 @@ def annotate(html: str, marks: List[dict], *, levels=LEVELS) -> AnnotateResult:
     """按引文把批注钉回原文；钉不上的条目照样入列，只是没有锚点。
 
     跨行内标签的引文按文本节点切段，一条批注可能对应多个共用 `data-an` 的 mark。
+    正文里已有的 mark 与 class / data-an 会先被剥掉，所以带伪造批注的输入，
+    输出 HTML 不会与输入逐字相同 —— 这正是要的。
     """
-    ex = extract(html)
+    ex = extract(_strip_forged(html))
     items = []
     for raw in (marks or []):
         item = _prepare(raw if isinstance(raw, dict) else {}, levels)
@@ -428,7 +448,7 @@ _SAFE_TAGS = frozenset((
 _SAFE_ATTRS = frozenset(("class", "data-an"))
 _VOID_TAGS = frozenset((
     "br", "img", "hr", "input", "meta", "link", "source", "col",
-    "area", "base", "wbr", "embed", "param", "track",
+    "area", "base", "wbr", "embed", "param", "track", "frame",
 ))
 _DROP_SUBTREE = frozenset((
     "script", "style", "iframe", "object", "embed", "applet", "noscript",
@@ -454,6 +474,8 @@ class _Cleaner(HTMLParser):
                 self._drop_depth += 1
             return
         if name in _DROP_SUBTREE:
+            if name in _VOID_TAGS:
+                return                       # 空元素等不到闭合标签，进了 drop 模式就再也出不来
             self._drop_tag, self._drop_depth = name, 1
             return
         if name not in _SAFE_TAGS:
@@ -592,7 +614,7 @@ def render_page(title: str, original_html: str, result: AnnotateResult, meta: di
             "<p class=\"foot\">批注由脚本锚定，未定位条目脚本不擅自摆放。</p>"
             "</div><script>%s</script></body></html>\n"
             % (_escape(title), _PAGE_CSS, _escape(title), "　·　".join(b for b in bits if b),
-               sanitize(result.html or original_html or ""), "".join(side), _PAGE_JS))
+               sanitize(result.html or _strip_forged(original_html or "")), "".join(side), _PAGE_JS))
 
 
 # ---------------------------------------------------------------- 自测
@@ -821,6 +843,43 @@ def t_plain_text_with_angles():
     check(extract(plain).text == plain, "撞上标签名的不等号也不得被吞，实际 %r" % extract(plain).text)
 
 
+def t_sanitize_void_drop():
+    """空元素不能把后面的正文一起吞掉（embed / frame 既是空元素又在丢弃名单里）。"""
+    for bad in ('<embed src="x">', '<embed src="x"/>', '<frame src="x">',
+                "<embed>", "<object data=x></object>", '<iframe src="x"></iframe>'):
+        out = sanitize("<p>一</p>%s<p>二</p>" % bad)
+        check("二" in out, "%s 之后的正文必须保留，实际 %r" % (bad, out))
+        check("一" in out, "%s 之前的正文必须保留，实际 %r" % (bad, out))
+        check("<embed" not in out and "<frame" not in out and "<iframe" not in out and "<object" not in out,
+              "%s 本身不该留在页面上，实际 %r" % (bad, out))
+    # 真正带闭合标签的丢弃项，里面的内容仍然要丢干净
+    dropped = sanitize("<p>一</p><script>alert(1)</script><p>二</p>")
+    check("alert" not in dropped, "script 的内容应被丢掉，实际 %r" % dropped)
+    check("一" in dropped and "二" in dropped, "script 前后的正文应保留，实际 %r" % dropped)
+    nested = sanitize("<p>一</p><object data=x><object data=y></object></object><p>二</p>")
+    check("二" in nested, "嵌套的丢弃项闭合后应恢复，实际 %r" % nested)
+
+
+def t_forged_mark():
+    """正文自带的 mark 与 class / data-an 是伪造的批注，进引擎前先剥掉。"""
+    src = ('<p>正文 <mark class="an an-major" data-an="1">伪造的批注</mark> 结束</p>'
+           '<p class="an an-minor" data-an="2" title="留着">整段伪造</p>')
+    res = annotate(src, [{"quote": "结束", "level": "remark", "note": "真批注"}])
+    check("伪造的批注" in res.html and "整段伪造" in res.html, "伪造标记里的文字应作为普通文本留下，实际 %r" % res.html)
+    check("an-major" not in res.html and "an-minor" not in res.html, "伪造的 class 应被剥掉，实际 %r" % res.html)
+    check('title="留着"' in res.html, "class 以外的属性不该被误删，实际 %r" % res.html)
+    ids = re.findall(r'data-an="(\d+)"', res.html)
+    anchored = [m for m in res.marks if m["anchored"]]
+    check(len(anchored) == 1, "真批注应锚定成功，实际 %r" % res.marks)
+    check(ids == ["1"], "页面上只应有引擎自己钉的那些段，实际 %r" % ids)
+    page = render_page("伪造样例", src, res, {})
+    check('data-an="2"' not in page, "伪造的编号不该出现在页面上")
+    # 页面自带的样式表里有 mark.an-major 选择器，所以要按属性形态查
+    check('class="an an-major"' not in page, "伪造的 mark 不该出现在页面上")
+    check(page.count('<mark class="an an-remark" data-an="1">') == 1, "页面上只应有引擎钉的那一个 mark")
+    check("伪造的批注" in page, "伪造标记里的文字应作为普通文本出现在页面上")
+
+
 def t_banned_words_selfscan():
     """引擎自身不含禁用词；同时正向验证扫描器确实会报。"""
     import os
@@ -874,6 +933,8 @@ SELFTESTS = (
     t_render_selfcontained,
     t_inline_tag_span,
     t_plain_text_with_angles,
+    t_sanitize_void_drop,
+    t_forged_mark,
     t_banned_words_selfscan,
 )
 
