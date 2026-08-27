@@ -396,6 +396,107 @@ def t_progress_append(root):
     return "两次通过 → progress 两行且首行不变；progress 给走势；check 0 ERROR"
 
 
+def t_regrade_same_attempt(root):
+    """同一个 attempt 重批：作答一字未改就不该换出另一个分数。"""
+    ws = new_ws(root)
+    graded_01(root, ws)
+    before = load(os.path.join(ws, "attempts", "01", "result.json"))
+    check(before["points"] == 3, "前置：01 应是 3 分，实际 %r" % before["points"])
+
+    # 作答一个字没改，只把 inbox 里的结果改成自洽的另一个分数
+    body = payload(root, "01", 2,
+                   [("hit", Q_ROTATE), ("miss", ""), ("partial", Q_CASE)],
+                   marks=[], summary=SUMMARY_3)
+    submit(ws, "01", body)
+    rc, out, err = run(root, "grade", SLUG, "01")
+    check(rc == 1, "同一稿重批换分数应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("same_draft" in gate_names(out, "ERROR"), "应报 same_draft 闸门：\n%s" % out)
+    after = load(os.path.join(ws, "attempts", "01", "result.json"))
+    check(after["points"] == 3, "被拒收时不该覆盖 result.json，实际 %r" % after["points"])
+    lines = [ln for ln in read(os.path.join(ws, "progress.md")).split("\n") if ln.startswith("- ")]
+    check(len(lines) == 1, "被拒收时不该往 progress 追加，实际 %r" % lines)
+
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "被拒收后工作区应仍然干净，rc=%d\n%s%s" % (rc, out, err))
+    return "同 attempt 重批换分 → 退出 1，不覆盖 result、不动 progress"
+
+
+def t_check_progress_tamper(root):
+    """progress.md 被手改或缺行 —— check 逐字比对后报 ERROR。"""
+    ws = new_ws(root)
+    graded_01(root, ws)
+    path = os.path.join(ws, "progress.md")
+    original = read(path)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "干净工作区 check 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+
+    write(path, original.replace("3/5", "5/5"))
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1, "progress 被改过应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("progress" in gate_names(out, "ERROR"), "应报 progress 闸门：\n%s" % out)
+    check("3/5" in out, "应把该有的那一行原样列出来：\n%s" % out)
+
+    write(path, "# 进度\n\n")
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1, "progress 缺行应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("progress" in gate_names(out, "ERROR"), "缺行也该报 progress 闸门：\n%s" % out)
+
+    write(path, original)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "原样放回后应重新退出 0，rc=%d\n%s%s" % (rc, out, err))
+    return "progress 行被改 / 整行缺失 → check 退出 1；放回原样即恢复"
+
+
+def t_check_baseline_tamper(root):
+    """盖章之后把对抗基线换成真作答 —— 盖章作废，check 与 grade 都拦。"""
+    ws = new_ws(root)
+    graded_01(root, ws)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "前置：check 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+
+    write(os.path.join(ws, "attempts", "base-noise", "answer.md"), ANSWER_01)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1, "基线被换掉后 check 应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("baseline" in gate_names(out, "ERROR"), "应报 baseline 闸门：\n%s" % out)
+    check("base-noise" in out, "应点名是哪一份基线：\n%s" % out)
+
+    rc, out, err = run(root, "grade", SLUG, "01")
+    check(rc == 2, "盖章作废后不许再批真作答，rc=%d\n%s%s" % (rc, out, err))
+    check("作废" in (out + err), "应说清盖章为什么作废：\n%s%s" % (out, err))
+    return "盖章后换掉基线 → check 退出 1、真作答 grade 退出 2"
+
+
+def t_no_points_table(root):
+    """条目表不带分值时也不能白给分：证据锚不到就整份退回，全未命中就不许有分。"""
+    src = os.path.join(root, "criteria-in.json")
+    bare = {"max": 5, "lang": "zh",
+            "criteria": [{"name": "轮流可借"}, {"name": "可预期回收"}, {"name": "举例具体"}]}
+    ws = new_ws(root, criteria=False)
+    write_json(src, bare)
+    rc, out, err = run(root, "criteria", "set", SLUG, "--from", src)
+    check(rc == 0, "不带分值的条目表应可写入，rc=%d\n%s%s" % (rc, out, err))
+    write(os.path.join(ws, "attempts", "01", "answer.md"), ANSWER_01)
+    pass_baselines(root, ws)
+
+    fake = [("hit", "第一句伪造的引文"), ("hit", "第二句伪造的引文"), ("hit", "第三句伪造的引文")]
+    submit(ws, "01", payload(root, "01", 5, fake, marks=[], summary=SUMMARY_3))
+    rc, out, err = run(root, "grade", SLUG, "01")
+    check(rc == 1, "证据全锚不到却给满分应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("evidence_points" in gate_names(out, "ERROR"), "应报 evidence_points 闸门：\n%s" % out)
+    check(not os.path.isfile(os.path.join(ws, "attempts", "01", "result.json")),
+          "拒收时不该写 result.json")
+
+    submit(ws, "01", payload(root, "01", 3, [("miss", "")] * 3, marks=[], summary=SUMMARY_3))
+    rc, out, err = run(root, "grade", SLUG, "01")
+    check(rc == 1, "全未命中却给分应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("points_sum" in gate_names(out, "ERROR"), "应报 points_sum 闸门：\n%s" % out)
+
+    submit(ws, "01", payload(root, "01", 0, [("miss", "")] * 3, marks=[], summary=SUMMARY_3))
+    rc, out, err = run(root, "grade", SLUG, "01")
+    check(rc == 0, "全未命中 0 分应通过，rc=%d\n%s%s" % (rc, out, err))
+    return "不带分值：证据锚不到 → 退出 1；全未命中却给分 → 退出 1；0 分放行"
+
+
 def t_lower_points_warn(root):
     """分数比上一稿低只提示核对，不拒收。"""
     ws = new_ws(root)
@@ -683,6 +784,10 @@ SELFTESTS = (
     t_baseline_must_be_zero,
     t_same_draft_same_points,
     t_progress_append,
+    t_regrade_same_attempt,
+    t_check_progress_tamper,
+    t_check_baseline_tamper,
+    t_no_points_table,
     t_lower_points_warn,
     t_gate_hash,
     t_gate_unknown_key,

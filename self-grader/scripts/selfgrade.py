@@ -332,6 +332,10 @@ class Practice:
         earlier = [n for n in self.passed() if n < name]
         return self.record(earlier[-1]) if earlier else None
 
+    def own_pass(self, name):
+        """这个 attempt 自己上一次批出来的结果 —— 重批时拿它比，别让同一稿换分数。"""
+        return self.record(name) if os.path.isfile(self.result_path(name)) else None
+
     # --- 基线盖章
 
     def baseline_body(self, name):
@@ -339,6 +343,20 @@ class Practice:
         return {"base-empty": "",
                 "base-echo": self.question_text + "\n",
                 "base-noise": NOISE_ANSWER}[name]
+
+    def baseline_intact_problems(self):
+        """三份对抗作答必须还是磁盘上脚本生成的那一份，且结果就是照它批出来的。"""
+        out = []
+        for name in BASE_ATTEMPTS:
+            path, body = self.answer_path(name), self.baseline_body(name)
+            if not os.path.isfile(path) or read_text(path) != body:
+                out.append("attempts/%s/answer.md 已经不是 baseline 生成的那一份" % name)
+                continue
+            if not os.path.isfile(self.result_path(name)):
+                continue                       # 还没批，缺哪份由 baseline_problem 去说
+            if self.record(name).get("answer_hash") != sha256_text(body):
+                out.append("基线 %s 的结果不是照现在这份作答批的" % name)
+        return out
 
     def material_hashes(self):
         return {"question": sha256_text(self.question_text),
@@ -377,6 +395,10 @@ class Practice:
             if stamp.get(key) != now[key]:
                 return ("盖章之后「%s」改过了，基线作废。重跑 baseline <slug> 并把三份基线重批一遍。"
                         % {"question": "题目", "rubric": "评分标准", "criteria": "条目表"}[key])
+        bad = self.baseline_intact_problems()
+        if bad:
+            return ("%s，盖章作废。重跑 baseline <slug> 拿回原样，再把三份基线重批一遍。"
+                    % "；".join(bad))
         return None
 
 
@@ -509,13 +531,22 @@ def _gate_evidence(items, extraction, err, warn):
 
 
 def _gate_points_sum(items, submitted, table, points, err):
-    """带分值的条目表：分数必须算得出来，且不因为证据落空而悄悄变样。"""
+    """分数得跟条目判定对得上：带分值的逐条算，不带分值的至少不能自相矛盾。"""
     by_name = dict((c["name"], c.get("points")) for c in table)
-    if not table or any(c.get("points") is None for c in table):
-        return
-    if len(items) != len(table) or any(it["name"] not in by_name for it in items):
+    if not table or len(items) != len(table) or any(it["name"] not in by_name for it in items):
         return
     if any(v is None for v in submitted):
+        return
+    final = [it["verdict"] for it in items]
+    if any(c.get("points") is None for c in table):
+        # 条目不带分值：算不出「降级该扣多少」，所以只能守住两条底线
+        fell = [it["name"] for it in items if it.get("evidence_unanchored")]
+        if fell:
+            err("evidence_points", "条目表没标分值，脚本算不出证据落空该扣多少分，"
+                                   "所以引文一锚不到就整份退回：%s。换一句真的在作答里的引文，"
+                                   "或者如实判未命中。" % "、".join(str(x) for x in fell))
+        if points and all(v == "miss" for v in final):
+            err("points_sum", "条目全部未命中，却给了 %d 分 —— 分数没有任何条目撑着" % points)
         return
 
     def total(verdicts):
@@ -532,7 +563,7 @@ def _gate_points_sum(items, submitted, table, points, err):
     if points is not None and points != raw:
         err("points_sum", "points 是 %d，但按条目判定算出来是 %d（命中给满、部分给一半向下取整）"
             % (points, raw))
-    after = total([it["verdict"] for it in items])
+    after = total(final)
     if after != raw:
         err("evidence_points", "证据锚不到让分数从 %d 变成了 %d，整份退回重批 —— "
                                "要么换一句真的在作答里的引文，要么如实判未命中" % (raw, after))
@@ -634,6 +665,21 @@ def gate_baseline_zero(normalized, errors):
     if hit:
         errors.append({"name": "baseline_zero",
                        "message": "对抗基线上有条目判成了命中：%s" % "、".join(str(n) for n in hit)})
+
+
+def gate_regrade(own, answer_hash, normalized, errors):
+    """同稿闸的另一半：同一个 attempt 重批，作答没改就不该批出另一个分数。"""
+    if own is None or normalized is None:
+        return
+    if own.get("answer_hash") != answer_hash:
+        return
+    if normalized.get("points") != own.get("points"):
+        errors.append({"name": "same_draft",
+                       "message": "attempt %s 上次批的是 %s 分，作答一字未改，这次却批成 %s 分。"
+                                  "重批不该换分数 —— 要么改作答另起一稿，"
+                                  "要么先说清上次哪条判错了再改。"
+                                  % (own.get("attempt"), own.get("points"),
+                                     normalized.get("points"))})
 
 
 def gate_same_draft(previous, answer_hash, normalized, errors):
@@ -831,6 +877,7 @@ def cmd_grade(args):
         gate_baseline_intact(ws, name, answer, errors)
         gate_baseline_zero(normalized, errors)
     else:
+        gate_regrade(ws.own_pass(name), answer_hash, normalized, errors)
         previous = ws.previous_pass(name)
         same_draft = gate_same_draft(previous, answer_hash, normalized, errors)
         gate_monotonic(previous, normalized, warnings)
@@ -863,7 +910,7 @@ def cmd_grade(args):
 
     misses = [it["name"] for it in record["criteria"] if it.get("verdict") == "miss"]
     if not is_base:
-        append_progress(ws, record, misses)
+        append_progress(ws, record)
     tail = ""
     if is_base:
         tail = (" · 已盖章，可以批真作答了" if ws.stamp_baselines()
@@ -874,12 +921,18 @@ def cmd_grade(args):
     return 0
 
 
-def append_progress(ws, record, misses):
+def progress_line(record):
+    """一份 result.json 对应 progress.md 里的哪一行 —— 写和复核都用这一个来源。"""
+    misses = [it.get("name") for it in record.get("criteria", []) if it.get("verdict") == "miss"]
+    return "- %s · attempt %s · %s/%s · 未命中：%s%s" % (
+        record.get("checkedAt"), record.get("attempt"), record.get("points"), record.get("max"),
+        "、".join(str(x) for x in misses) if misses else "无",
+        " · sameDraft" if record.get("sameDraft") else "")
+
+
+def append_progress(ws, record):
     """progress.md 只增：一行一次通过的批改，重复的一行不再追加。"""
-    line = "- %s · attempt %s · %d/%d · 未命中：%s%s" % (
-        record["checkedAt"], record["attempt"], record["points"], record["max"],
-        "、".join(misses) if misses else "无",
-        " · sameDraft" if record["sameDraft"] else "")
+    line = progress_line(record)
     text = read_text(ws.progress_path) if os.path.isfile(ws.progress_path) else PROGRESS_HEAD
     if line in text.split("\n"):
         return
@@ -945,8 +998,6 @@ def cmd_check(args):
         if rec.get("points") or hit:
             err("baseline_zero", "基线 %s 的结果不是 0 分全未命中（%s 分，命中 %s）"
                 % (name, rec.get("points"), "、".join(str(n) for n in hit) or "无"))
-        if rec.get("answer_hash") != sha256_text(ws.baseline_body(name)):
-            err("baseline_intact", "基线 %s 批的不是脚本生成的那份作答" % name)
 
     progress = read_text(ws.progress_path) if os.path.isfile(ws.progress_path) else ""
     previous = None
@@ -976,8 +1027,10 @@ def cmd_check(args):
                 and previous.get("points") != rec.get("points"):
             err("same_draft", "attempt %s 与 %s 是同一稿，分数却不一样（%s / %s）"
                 % (previous.get("attempt"), name, previous.get("points"), rec.get("points")))
-        if ("attempt %s " % name) not in progress:
-            warn("progress", "progress.md 里没有 attempt %s 的那一行" % name)
+        want_line = progress_line(rec)
+        if want_line not in progress.split("\n"):
+            err("progress", "progress.md 里没有 attempt %s 那一行的原样记录。"
+                            "按 result.json 重算，它应当是：%s" % (name, want_line))
         previous = rec
 
     report_gates(errors, warnings)
