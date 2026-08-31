@@ -103,10 +103,11 @@ _VOID_TAGS = frozenset((
     "br", "img", "hr", "input", "meta", "link", "source", "col",
     "area", "base", "wbr", "embed", "param", "track", "frame",
 ))
+# 只丢真没有正文语义的标签。form / textarea / video 这类容器里常有学生贴的作答
+# 或说明文字，走「脱壳留字」那条路，不能整树丢。
 _DROP_SUBTREE = frozenset((
     "script", "style", "iframe", "object", "embed", "applet", "noscript",
-    "template", "svg", "math", "form", "select", "textarea", "button",
-    "canvas", "audio", "video", "frame", "frameset",
+    "template", "svg", "math", "frame", "frameset",
 ))
 _ATTR_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 # 「干净」的开始标签：小写标签名、属性都是 name="value"、值里没有尖括号。这样的
@@ -891,7 +892,7 @@ def t_plain_text_with_angles():
 
 
 def t_sanitize_void_drop():
-    """空元素不能把后面的正文一起吞掉（embed / frame 既是空元素又在丢弃名单里）。"""
+    """丢弃名单的三条边界：空元素不吞后文、有正文语义的容器脱壳留字、未闭合容器吞到 EOF（钉现状）。"""
     for bad in ('<embed src="x">', '<embed src="x"/>', '<frame src="x">',
                 "<embed>", "<object data=x></object>", '<iframe src="x"></iframe>'):
         out = sanitize("<p>一</p>%s<p>二</p>" % bad)
@@ -905,6 +906,22 @@ def t_sanitize_void_drop():
     check("一" in dropped and "二" in dropped, "script 前后的正文应保留，实际 %r" % dropped)
     nested = sanitize("<p>一</p><object data=x><object data=y></object></object><p>二</p>")
     check("二" in nested, "嵌套的丢弃项闭合后应恢复，实际 %r" % nested)
+    # 有正文语义的容器（form / textarea / video 等）不整树丢，脱壳留字
+    for src, want in (("<form><p>正文</p></form>", "<p>正文</p>"),
+                      ("<textarea>学生贴的作答</textarea>", "学生贴的作答"),
+                      ("<video>说明文字</video>", "说明文字"),
+                      ("<select><option>甲</option><option>乙</option></select>", "甲乙"),
+                      ("<button>提交答案</button>", "提交答案"),
+                      ("<canvas>兜底文字</canvas>", "兜底文字"),
+                      ("<audio>音频说明</audio>", "音频说明")):
+        got = sanitize(src)
+        check(got == want, "%r 应脱壳留字成 %r，实际 %r" % (src, want, got))
+    # 钉现状：未闭合的丢弃容器按「到文件末尾自动闭合」处理，其后内容一并被丢
+    # （与浏览器对未闭合 script / style 的解析一致）。三份 references 的边界说明写了这一条。
+    for head in ("<p>一</p><script>alert(1)", "<p>一</p><style>p{}", "<p>一</p><iframe>"):
+        out = sanitize(head + "<p>二</p>")
+        check("一" in out and "二" not in out,
+              "%r：未闭合丢弃容器应吞掉其后内容（现状钉死），实际 %r" % (head, out))
 
 
 def t_sanitize_identity():
