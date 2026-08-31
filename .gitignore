@@ -4,7 +4,11 @@ __pycache__/
 # 示例题包只保留参考解判题报告；错题本与导出件是本机运行产物
 */examples/drills/misconceptions.md
 */examples/drills/*/export.json
+# 判卷示例的脱敏导出件同样是本机运行产物
+*/examples/grading/*/export.json
 # 内部文档（spec/plan/审计含内部路径与生产数据），不进公开仓
 internal/
 # SDD 工作区（账本/简报/审阅包），不进仓
 .superpowers/
+# agent worktree 检出
+.claude/worktrees/
