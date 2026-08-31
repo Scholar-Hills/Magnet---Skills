@@ -1,0 +1,11 @@
+{
+  "job": "short-answer-01",
+  "stamped_at": "2026-08-31 16:31:45",
+  "hashes": {
+    "rubric": "0db2c4ca04f1a5013bebb446ab58268664dfd7c8471d38cbeb6ccf31868da7ef",
+    "question": "d1f25ed52a2d309428d9c3c256cc0d8c2ea175034e49b8403fdb5b3e7d49f2b9",
+    "oracle_full": "98bb38ffa77981624d20249ed0bb70bb6f721a86329d405fc820865f9a741fa2",
+    "oracle_broken": "99f00aef87022700d500a776194e88fec5f448084b4decaa104d38f3cb9b08ed",
+    "oracle_missing": "d3f3ac535ff195246c952a6d8acfde27465118ae0e2cf240c9c3355a2970929f"
+  }
+}

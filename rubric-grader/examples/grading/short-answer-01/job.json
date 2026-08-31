@@ -1,0 +1,22 @@
+{
+  "slug": "short-answer-01",
+  "max": 5,
+  "lang": "zh",
+  "max_notes": 12,
+  "min_anchored": 0.7,
+  "criteria": [
+    {
+      "name": "定义准确",
+      "points": 2
+    },
+    {
+      "name": "例子贴切",
+      "points": 2
+    },
+    {
+      "name": "表述清楚",
+      "points": 1
+    }
+  ],
+  "created": "2026-08-31 16:31:45"
+}

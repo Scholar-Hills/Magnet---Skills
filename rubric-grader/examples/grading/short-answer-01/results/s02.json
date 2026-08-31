@@ -1,0 +1,69 @@
+{
+  "job": "short-answer-01",
+  "student": "s02",
+  "max": 5,
+  "graded_at": "2026-08-31 16:31:46",
+  "cautions": [],
+  "context_hash": "7828f783786b2bbd436a0be2214404590a9aaad8e3ae3bfcbf6305e1e9fb2d81",
+  "points": 2,
+  "summary": "整份作答停在「放弃的东西就是成本」这一层，没有点出关键的后半句——放弃的选项里价值最高的那一个，所以定义只能给一半。举例部分说到买东西，却没有落到一次具体的选择上，也没写清放弃了什么，同样只算半条。三段话反复说有得有失，读完拿不到新的信息，表述这一条没有分。建议重写：先把定义补完整，再挑一件真做过的选择，把被放弃的那个选项写出来。",
+  "criteria": [
+    {
+      "name": "定义准确",
+      "verdict": "partial",
+      "quote": "机会成本我理解就是放弃的东西",
+      "evidence_unanchored": false
+    },
+    {
+      "name": "例子贴切",
+      "verdict": "partial",
+      "quote": "比如买东西的时候，选择本身就有成本",
+      "evidence_unanchored": false
+    },
+    {
+      "name": "表述清楚",
+      "verdict": "miss",
+      "quote": "",
+      "evidence_unanchored": false
+    }
+  ],
+  "marks": [
+    {
+      "id": 1,
+      "quote": "机会成本我理解就是放弃的东西",
+      "level": "major",
+      "note": "只说到「放弃的东西」，漏掉了「价值最高的那一个」；按评分标准这一条只能拿一半。",
+      "anchored": true,
+      "partial": false,
+      "start": 3,
+      "end": 17,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 2,
+      "quote": "做什么事情都是这样，反正就是有得有失",
+      "level": "major",
+      "note": "这句把话说回了常识，读者拿不到新信息；例子要落到一次具体的选择上才算数。",
+      "anchored": true,
+      "partial": false,
+      "start": 71,
+      "end": 89,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 3,
+      "quote": "总之机会成本就是这么个意思",
+      "level": "minor",
+      "note": "结尾只是把开头再说一遍，没有给出结论，表述这一条因此没能拿分。",
+      "anchored": true,
+      "partial": false,
+      "start": 97,
+      "end": 110,
+      "level_fixed": false,
+      "dropped_overlap": false
+    }
+  ],
+  "anchored_ratio": 1.0
+}
