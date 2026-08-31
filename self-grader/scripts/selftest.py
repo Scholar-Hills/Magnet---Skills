@@ -452,8 +452,11 @@ def t_check_result_tamper(root):
     ws = new_ws(root)
     write(os.path.join(ws, "attempts", "01", "answer.md"), ANSWER_01)
     pass_baselines(root, ws)
+    # 三锚一不锚（锚定率 0.75，够得着 0.7 的下限），才腾得出「一真一假对调」的位置
     marks = [{"quote": Q_OCCUPY, "level": "minor", "note": "这一层可以再往前推一句，说明轮流的好处。"},
-             {"quote": Q_QUEUE, "level": "remark", "note": "结尾偏重复，换成第二条理由更有分量。"}]
+             {"quote": Q_BOOKED, "level": "remark", "note": "例子可信，可以再点一句它说明了什么。"},
+             {"quote": Q_QUEUE, "level": "remark", "note": "结尾偏重复，换成第二条理由更有分量。"},
+             {"quote": Q_ABSENT, "level": "minor", "note": "这条引文并不在作答里，锚不上很正常。"}]
     submit(ws, "01", payload(root, "01", 3,
                              [("hit", Q_ROTATE), ("miss", ""), ("hit", Q_CASE)], marks=marks))
     rc, out, err = run(root, "grade", SLUG, "01")
@@ -461,26 +464,37 @@ def t_check_result_tamper(root):
     rc, out, err = run(root, "check", SLUG)
     check(rc == 0, "前置：check 应退出 0，rc=%d\n%s%s" % (rc, out, err))
 
-    # 两条 anchored 对调：锚定率一点没变，逐条对账才抓得到
+    # 一条 true 改 false、另一条 false 改 true，anchored_ratio 原样不动 ——
+    # 落盘的比率仍与重算的一致，只有逐条对账抓得到这次篡改
     path = os.path.join(ws, "attempts", "01", "result.json")
+    pristine = read(path)
     rec = load(path)
-    check([m["anchored"] for m in rec["marks"]] == [True, True], "前置：两条都该锚上：%r" % rec["marks"])
-    rec["marks"][0]["anchored"] = False
-    rec["marks"][1]["anchored"] = False
-    rec["anchored_ratio"] = 0.0
+    flags = [m["anchored"] for m in rec["marks"]]
+    check(flags.count(True) == 3 and flags.count(False) == 1,
+          "前置：应是三锚一不锚，实际 %r" % flags)
+    before = rec["anchored_ratio"]
+    rec["marks"][flags.index(True)]["anchored"] = False
+    rec["marks"][flags.index(False)]["anchored"] = True
     write_json(path, rec)
+    check(load(path)["anchored_ratio"] == before, "篡改不该动 anchored_ratio")
     rc, out, err = run(root, "check", SLUG)
     check(rc == 1, "手改 anchored 应退出 1，rc=%d\n%s%s" % (rc, out, err))
-    check("anchored_flag" in gate_names(out, "ERROR"), "应报 anchored_flag 闸门：\n%s" % out)
+    names = gate_names(out, "ERROR")
+    check("anchored_flag" in names, "应报 anchored_flag 闸门：\n%s" % out)
+    check("anchored_ratio" not in names,
+          "比率没被动过，旧的锚定率闸不该响 —— 这一条只能由逐条对账抓到：\n%s" % out)
 
-    # 只改分数：重跑闸门时条目分值算不平
+    # 锚定结论放回原样，再单独只改分数：重跑闸门时条目分值算不平
+    write(path, pristine)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "放回原样后 check 应重新退出 0，rc=%d\n%s%s" % (rc, out, err))
     rec = load(path)
     rec["points"] = 5
     write_json(path, rec)
     rc, out, err = run(root, "check", SLUG)
     check(rc == 1, "手改分数应退出 1，rc=%d\n%s%s" % (rc, out, err))
     check("replay" in gate_names(out, "ERROR"), "应报 replay 闸门：\n%s" % out)
-    return "手改 anchored（比率同步改掉）/ 手改分数 → check 都退出 1"
+    return "两条 anchored 对调（比率不变）→ 只有逐条对账抓到；手改分数 → 重跑闸门抓到"
 
 
 def t_check_baseline_tamper(root):
