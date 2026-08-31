@@ -459,7 +459,7 @@ def gate_anchored(result):
     for m in result.marks:
         if m.get("anchored"):
             continue
-        why = "与前一条批注重叠，脚本只留了长的那条" if m.get("dropped_overlap") else "稿子里找不到这一句"
+        why = "与别的批注重叠，脚本留了起点靠前的那条（同起点取长）" if m.get("dropped_overlap") else "稿子里找不到这一句"
         lines.append("    第 %d 条（%s）：%s" % (m.get("id", 0), why, _cut(m.get("quote"), 60)))
     return ["\n".join(lines)]
 

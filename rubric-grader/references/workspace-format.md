@@ -49,7 +49,7 @@ grading/
 
 ## 2. `job.json`
 
-`init` 建好骨架，`rubric set` 只改写 `criteria` 一个键，其余字段可以由老师手改。
+`init` 建好骨架，`rubric set` 只改写 `criteria` 一个键，其余字段可以由老师手改。注意 `max` 与 `lang` 也参与上下文哈希：手改任一个都会让所有已批结果过期，须逐份重跑 `grade`。
 
 | 键 | 类型 | 说明 |
 |---|---|---|
@@ -117,7 +117,7 @@ grading/
 {"answer_text", "criteria", "lang", "max", "question_text", "rubric_text"}
 ```
 
-其中 `question_text`、`rubric_text`、`answer_text` 都是引擎抽出来的纯文本。所以**题干、评分标准、条目表、作答任一改动，哈希都会变**，旧结果自动过期。
+其中 `question_text`、`rubric_text`、`answer_text` 都是引擎抽出来的纯文本。所以**题干、评分标准、条目表、作答四样材料任一改动，或 `max` / `lang` 任一变化，哈希都会变**，旧结果自动过期。
 
 `context` 命令另外输出 `job` / `max_notes` / `min_anchored` / `context_hash` 四个键，它们不参与哈希，只是给 Agent 看的。
 
