@@ -59,8 +59,9 @@ RUBRIC_STUB = ("把你自己带来的评分标准原样贴在这里 —— 老�
                "本 Skill 不内置任何学科评分标准，也不会替你猜。脚本不改这个文件。\n")
 PROGRESS_HEAD = "# 进度（脚本只增不改，手改这里就对不上 result.json 了）\n\n"
 
-_RECAP = re.compile(r"第\s*[0-9〇一二三四五六七八九十]+\s*题")
-_WORD = re.compile(r"[A-Za-z0-9']+")
+# 「第 3 题」式逐题复述。字符类与 rubric-grader 的那一条对齐，并各自补上对方缺的写法：
+# 半角与全角数字、〇 与中文数字、题 / 題 / 问 / 問，位数不设上限。
+_RECAP = re.compile(r"第\s*[0-9０-９〇一二三四五六七八九十百]+\s*[题題问問]")
 _SPACE = re.compile(r"\s+")
 
 
@@ -124,14 +125,19 @@ def short_hash(value):
 
 
 def count_units(text, lang):
-    """中文按字（不计空白），英文按词 —— 两种语言的「一段话」长度感差得远。"""
+    """中文按字（不计空白），英文按空白分词 —— 两种语言的「一段话」长度感差得远。
+
+    英文按空白切而不是按字母块切：`state-of-the-art` 是一个词，不是四个。
+    """
+    body = text or ""
     if lang == "en":
-        return len(_WORD.findall(text))
-    return len(_SPACE.sub("", text))
+        return len([w for w in _SPACE.split(body.strip()) if w])
+    return len(_SPACE.sub("", body))
 
 
 def trigrams(text):
-    folded = anchor.normalize(text)
+    """空心闸用的三字窗口：先规范化，再去掉全部空白并折成小写，中英文各自可比。"""
+    folded = _SPACE.sub("", anchor.normalize(text or "")).lower()
     return set(folded[i:i + 3] for i in range(len(folded) - 2))
 
 
@@ -410,6 +416,10 @@ def validate_grade(job, answer_text, payload):
     与 rubric-grader 的同名函数是同一套契约（spec §3.2 / §3.4）。两个 Skill 必须能各自
     整目录拷走独立安装，所以这段是复制而不是共享模块。
     `answer_text` 是 answer.md 的原文；纯文本与位置映射由函数内一次 `extract` 同时得到。
+
+    只有一处**故意**比 rubric-grader 严：条目表不标分值时，`_gate_points_sum` 仍守住
+    「引文锚不到就整份退回」与「全部未命中就不许有分」两条底线（自批没有第二个人复核，
+    这两条一让开就等于白给分）。别把它当成没对齐而删掉。
     """
     # 与 rubric-grader 同步：改这里要同步改 grader.py 的 validate_grade，以那一份为准。
     errors, warnings = [], []
@@ -484,15 +494,22 @@ def _gate_points(payload, limit, err):
 
 
 def _gate_criteria(payload, table, err):
-    """条目必须与条目表一一对应、顺序一致 —— 少一条多一条都不算批完。"""
+    """条目必须与条目表一一对应，不多不少；顺序不论，脚本自己按条目表排好。
+
+    条目名是对应关系的唯一依据（与 rubric-grader 同口径）：模型换个顺序交上来不算错，
+    少一条、多一条、同一条交两次才算。对应不上时返回空列表，后面的分值闸自动让开 ——
+    条目都没对齐，再去算「这个分数对不对」只会刷出一堆连带错误。
+    """
     raw = payload.get("criteria")
     if not isinstance(raw, list):
         err("criteria_table", "criteria 必须是数组，实际 %r" % (raw,))
-        raw = []
-    items = []
+        return []
+    want = [c["name"] for c in table]
+    seen, broken = {}, False
     for i, one in enumerate(raw, 1):
         if not isinstance(one, dict):
             err("criteria_table", "第 %d 条不是对象" % i)
+            broken = True
             continue
         bad = sorted(set(one) - set(CRITERIA_KEYS))
         if bad:
@@ -503,14 +520,20 @@ def _gate_criteria(payload, table, err):
             err("verdict_value", "第 %d 条的 verdict 只能是 %s，实际 %r"
                 % (i, " / ".join(VERDICTS), verdict))
             verdict = None
-        items.append({"name": one.get("name"), "verdict": verdict,
-                      "quote": str(one.get("quote") or "")})
-    want = [c["name"] for c in table]
-    got = [it["name"] for it in items]
-    if got != want:
-        err("criteria_table", "criteria 必须与条目表逐条对应、顺序一致：条目表是 %s，结果里是 %s"
-            % ("、".join(want), "、".join(str(n) for n in got) or "（空）"))
-    return items
+        name = str(one.get("name") or "")
+        if name in seen:
+            err("criteria_table", "条目「%s」提交了两次" % name)
+            broken = True
+        seen[name] = {"name": name, "verdict": verdict, "quote": str(one.get("quote") or "")}
+    absent = [n for n in want if n not in seen]
+    extra = [n for n in sorted(seen) if n not in want]
+    if absent:
+        err("criteria_table", "criteria 少了条目表里的：%s" % "、".join(absent))
+        broken = True
+    if extra:
+        err("criteria_table", "criteria 多了条目表以外的：%s" % "、".join(extra))
+        broken = True
+    return [] if broken else [seen[n] for n in want]
 
 
 def _gate_evidence(items, extraction, err, warn):
@@ -587,16 +610,17 @@ def _gate_marks(payload, answer_text, cap, floor, err, warn):
         if bad:
             err("mark_keys", "第 %d 条批注多了不认识的键：%s（只收 %s）"
                 % (i, "、".join(bad), "、".join(MARK_KEYS)))
-        quote = str(one.get("quote") or "").strip()
-        note = str(one.get("note") or "").strip()
-        if not quote:
+        quote = str(one.get("quote") or "")
+        note = str(one.get("note") or "")
+        if not quote.strip():
             err("note_quality", "第 %d 条批注没给引文" % i)
-        if len(_SPACE.sub("", note)) < NOTE_MIN:
+        if len(note.strip()) < NOTE_MIN:
             err("note_quality", "第 %d 条批注的批语不足 %d 字：%s" % (i, NOTE_MIN, clip(note)))
-        if note and note in seen:
-            err("note_dup", "第 %d 条与第 %d 条的批语一字不差：%s" % (i, seen[note], clip(note)))
-        elif note:
-            seen[note] = i
+        # 重复判据用规范化后的批语：只差一个空格或一对弯引号，说的还是同一句话。
+        key = anchor.normalize(note)
+        if key and key in seen:
+            err("note_dup", "第 %d 条与第 %d 条的批语一字不差：%s" % (i, seen[key], clip(note)))
+        seen.setdefault(key, i)
         clean.append({"quote": quote, "level": one.get("level", anchor.DEFAULT_LEVEL), "note": note})
 
     result = anchor.annotate(answer_text, clean)
@@ -941,6 +965,26 @@ def append_progress(ws, record):
     write_text(ws.progress_path, text + line + "\n")
 
 
+def anchor_drift(name, record, normalized):
+    """落盘的每条 anchored 必须等于重新锚定算出来的那一个。
+
+    锚定率对得上不等于每条都对得上：把一条 true 改成 false、另一条 false 改成 true，
+    比率一点没变。而判题卡和导出直接读这个字段，不对账就等于让人手写「这条我锚上了」。
+    """
+    problems = []
+    stored = [m for m in record.get("marks", []) if isinstance(m, dict)]
+    fresh = (normalized or {}).get("marks") or []
+    if len(stored) != len(fresh):
+        return ["attempt %s 落盘 %d 条批注，重新锚定得到 %d 条" % (name, len(stored), len(fresh))]
+    bad = [i for i, (a, b) in enumerate(zip(stored, fresh), 1)
+           if bool(a.get("anchored")) != bool(b.get("anchored"))]
+    if bad:
+        problems.append("attempt %s 第 %s 条批注落盘的 anchored 与重新锚定的结论对不上；"
+                        "锚没锚上由引擎说了算，不许手改"
+                        % (name, "、".join(str(i) for i in bad)))
+    return problems
+
+
 def drafts_of(ws):
     """按 answer 哈希把连续同稿折成一稿；走势只看稿子变了几次。"""
     out = []
@@ -1021,6 +1065,8 @@ def cmd_check(args):
         if normalized and abs(normalized["anchored_ratio"] - (rec.get("anchored_ratio") or 0)) > 1e-6:
             err("anchored_ratio", "attempt %s 存的锚定率 %r 与重算的 %r 对不上"
                 % (name, rec.get("anchored_ratio"), normalized["anchored_ratio"]))
+        for gate in anchor_drift(name, rec, normalized):
+            err("anchored_flag", gate)
         if rec.get("answer_hash") != sha256_text(answer):
             err("answer_hash", "attempt %s 的 answer.md 在批改之后改过了，这份结果已作废" % name)
         if previous is not None and previous.get("answer_hash") == rec.get("answer_hash") \

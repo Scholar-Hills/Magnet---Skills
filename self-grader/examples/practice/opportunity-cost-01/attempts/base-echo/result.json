@@ -1,0 +1,30 @@
+{
+  "slug": "opportunity-cost-01",
+  "attempt": "base-echo",
+  "checkedAt": "2026-08-31",
+  "points": 0,
+  "max": 5,
+  "summary": "这一份只是把题面又抄了一遍，没有出现任何属于作答者自己的判断：既没有给出机会成本的定义，也没有在兼职与打球之间选出一项，更没有自己的例子。复述题目不构成作答，三个条目全部判为未命中。下一步先改哪一条：把题目里的问句改写成你自己的陈述句再往下写。",
+  "criteria": [
+    {
+      "name": "定义准确",
+      "verdict": "miss",
+      "quote": ""
+    },
+    {
+      "name": "用到本题",
+      "verdict": "miss",
+      "quote": ""
+    },
+    {
+      "name": "自举例子",
+      "verdict": "miss",
+      "quote": ""
+    }
+  ],
+  "marks": [],
+  "anchored_ratio": 0.0,
+  "context_hash": "69c9d80eb551a91ee83efb74abf442174a16f3f0525a9a567216145bc9628c7d",
+  "answer_hash": "80c4fd34538c344561c917d287c38119623a461486540a64c745772193856e3a",
+  "sameDraft": false
+}

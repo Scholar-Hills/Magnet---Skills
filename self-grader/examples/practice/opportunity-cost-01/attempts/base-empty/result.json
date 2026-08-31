@@ -1,0 +1,30 @@
+{
+  "slug": "opportunity-cost-01",
+  "attempt": "base-empty",
+  "checkedAt": "2026-08-31",
+  "points": 0,
+  "max": 5,
+  "summary": "这一份什么都没写，题目问的三层——机会成本是什么、在本题里到底是哪一项、你自己生活里的例子——一层都没有出现，所以三个条目全部判为未命中，总分为零。下一步先改哪一条：先用一句完整的话写出你理解的机会成本定义，哪怕只有一句也比空着强。",
+  "criteria": [
+    {
+      "name": "定义准确",
+      "verdict": "miss",
+      "quote": ""
+    },
+    {
+      "name": "用到本题",
+      "verdict": "miss",
+      "quote": ""
+    },
+    {
+      "name": "自举例子",
+      "verdict": "miss",
+      "quote": ""
+    }
+  ],
+  "marks": [],
+  "anchored_ratio": 0.0,
+  "context_hash": "c31e4d07014457bf8aa0e3ca41369db0e15309698742ce7075a65d4bb891ad7e",
+  "answer_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "sameDraft": false
+}

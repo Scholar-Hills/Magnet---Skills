@@ -1,0 +1,20 @@
+{
+  "max": 5,
+  "lang": "zh",
+  "max_notes": 12,
+  "min_anchored": 0.7,
+  "criteria": [
+    {
+      "name": "定义准确",
+      "points": 2
+    },
+    {
+      "name": "用到本题",
+      "points": 2
+    },
+    {
+      "name": "自举例子",
+      "points": 1
+    }
+  ]
+}

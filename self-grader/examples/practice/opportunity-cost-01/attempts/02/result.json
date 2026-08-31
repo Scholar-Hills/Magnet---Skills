@@ -1,0 +1,55 @@
+{
+  "slug": "opportunity-cost-01",
+  "attempt": "02",
+  "checkedAt": "2026-08-31",
+  "points": 4,
+  "max": 5,
+  "summary": "这一稿把定义用到了题里：你在兼职和打球之间挑出了价值更高的那一个，还说明了为什么打球那一项估不出确定的钱数，这一步比上一稿扎实很多。还差的是自己生活里的例子，最后那句话没有具体的人、事和被放弃的选项，读者据此判断不了你会不会用这个概念。下一步先改哪一条：把最后一句换成一件真发生过的事，写清你当时选了什么、同时放弃了什么。",
+  "criteria": [
+    {
+      "name": "定义准确",
+      "verdict": "hit",
+      "quote": "被放弃的那些选项里价值最高的那一个"
+    },
+    {
+      "name": "用到本题",
+      "verdict": "hit",
+      "quote": "在这两者之间价值最高的是兼职"
+    },
+    {
+      "name": "自举例子",
+      "verdict": "miss",
+      "quote": ""
+    }
+  ],
+  "marks": [
+    {
+      "id": 1,
+      "quote": "说不出具体值多少钱",
+      "level": "remark",
+      "note": "这里可以补一句：估不出钱数时按更保守的一边算，判断会更站得住。",
+      "anchored": true,
+      "partial": false,
+      "start": 98,
+      "end": 107,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 2,
+      "quote": "做完之后才发现另一件更值",
+      "level": "major",
+      "note": "还是没有具体的人和事；写清那次你放弃的到底是什么，这一条才拿得到分。",
+      "anchored": true,
+      "partial": false,
+      "start": 188,
+      "end": 200,
+      "level_fixed": false,
+      "dropped_overlap": false
+    }
+  ],
+  "anchored_ratio": 1.0,
+  "context_hash": "bb639f4c736f3c5735cf0af666806a00de4266c7ed175cac0a9bf0fc43a8d9af",
+  "answer_hash": "6a26646f60713b2f6b7a9b1909b5131314605597dd71741defbb2f7679c130c0",
+  "sameDraft": false
+}
