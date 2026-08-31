@@ -20,6 +20,7 @@ grading/
       broken.json                  # {"missing": ["条目名", ...]}，残缺版缺哪几条
     answers/
       <学号>.md                     # 学生作答；也支持 .txt / .html / .docx
+                                   # 学号只能是小写字母、数字与连字符（不超过 64 位，且以字母或数字开头）
       base-empty.md                # 对抗基线：空白（文件名以 base- 开头即被强制 0 分）
       base-echo.md                 # 对抗基线：把题面原样贴回
       base-noise.md                # 对抗基线：与题目无关的段落

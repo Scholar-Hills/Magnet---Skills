@@ -31,6 +31,16 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import anchor                                                    # noqa: E402
 
+# 稿号（attempt 名，含对抗基线名）会拼进 attempts/ 的目录名，按 red-pen 的 slug 口径校验。
+ATTEMPT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def check_attempt(name):
+    """稿号要拼进 attempts/ 的目录名，按 slug 口径校验，一步不许穿越目录。"""
+    if not ATTEMPT_RE.match(name or ""):
+        raise UsageError("稿号只能是小写字母、数字与连字符（不超过 64 位），当前是：%r" % name)
+    return name
+
 VERDICTS = ("hit", "partial", "miss")
 PAYLOAD_KEYS = ("context_hash", "points", "summary", "criteria", "marks")
 CRITERIA_KEYS = ("name", "verdict", "quote")
@@ -847,7 +857,7 @@ def cmd_baseline(args):
 
 def cmd_context(args):
     ws = Practice(resolve_ws(args.slug))
-    name = args.attempt
+    name = check_attempt(args.attempt)
     os.makedirs(os.path.join(ws.attempt_dir(name), "inbox"), exist_ok=True)
     path = ws.answer_path(name)
     if not os.path.isfile(path):
@@ -881,7 +891,7 @@ def cmd_context(args):
 
 def cmd_grade(args):
     ws = Practice(resolve_ws(args.slug))
-    name = args.attempt
+    name = check_attempt(args.attempt)
     is_base = name in BASE_ATTEMPTS
     print("批改：%s · attempt %s%s" % (ws.slug, name, "（对抗基线）" if is_base else ""))
     if not is_base:

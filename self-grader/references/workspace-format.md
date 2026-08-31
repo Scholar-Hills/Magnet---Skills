@@ -17,6 +17,7 @@ practice/<slug>/
   progress.md                     进度，只增不删；格式见 §5
   .stamps/baseline.json           基线盖章；见 §4
   attempts/01/answer.md           你的第一稿（脚本不代写）
+                                  # 稿号只能是小写字母、数字与连字符（不超过 64 位，且以字母或数字开头）；建议两位数编号
   attempts/01/inbox/grade.json    Agent 写的评分结果；见 §3
   attempts/01/result.json         闸门全过之后脚本写的真相
   attempts/01/result.html         判题卡，可直接截图

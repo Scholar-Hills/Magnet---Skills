@@ -396,6 +396,16 @@ def t_progress_append(root):
     return "两次通过 → progress 两行且首行不变；progress 给走势；check 0 ERROR"
 
 
+def t_attempt_slug(root):
+    """稿号拼进 attempts/ 的目录名：slug 口径之外（穿越、大写、点号、中文）退出 2，且不落任何文件。"""
+    new_ws(root)
+    for bad in ("../../pwned-01", "A01", "01.bak", "第一稿"):
+        rc, out, err = run(root, "context", SLUG, bad)
+        check(rc == 2, "稿号 %r 应退出 2，rc=%d\n%s%s" % (bad, rc, out, err))
+        check("稿号" in (out + err), "应说明稿号口径，实际输出：\n%s%s" % (out, err))
+    check(not os.path.exists(os.path.join(root, "pwned-01")), "穿越稿号不得在练习目录外落文件")
+
+
 def t_regrade_same_attempt(root):
     """同一个 attempt 重批：作答一字未改就不该换出另一个分数。"""
     ws = new_ws(root)
@@ -851,6 +861,7 @@ SELFTESTS = (
     t_baseline_must_be_zero,
     t_same_draft_same_points,
     t_progress_append,
+    t_attempt_slug,
     t_regrade_same_attempt,
     t_check_progress_tamper,
     t_check_result_tamper,
