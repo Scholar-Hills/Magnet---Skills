@@ -1,0 +1,16 @@
+{
+  "criteria": [
+    {
+      "name": "定义准确",
+      "points": 2
+    },
+    {
+      "name": "例子贴切",
+      "points": 2
+    },
+    {
+      "name": "表述清楚",
+      "points": 1
+    }
+  ]
+}

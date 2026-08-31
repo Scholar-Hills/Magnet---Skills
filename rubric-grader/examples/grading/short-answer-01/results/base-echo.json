@@ -1,0 +1,45 @@
+{
+  "job": "short-answer-01",
+  "student": "base-echo",
+  "max": 5,
+  "graded_at": "2026-08-31 16:31:46",
+  "cautions": [],
+  "context_hash": "9d4ab1e2a4cc45688cdf193e9811512344b761cf1a5de35e441cda91ab2f5b0c",
+  "points": 0,
+  "summary": "交上来的内容是题面本身，一字不差地贴了回来，没有任何属于作答者的解释。题面里出现的「机会成本」只是被引用的题目用词，不能当成定义命中；同理，要求里提到的例子也不是他举的例子。三条评分标准在这份材料上都没有落点，给零分。这一份放在这里，是用来验证这一轮批改不会把题面当答案。",
+  "criteria": [
+    {
+      "name": "定义准确",
+      "verdict": "miss",
+      "quote": "",
+      "evidence_unanchored": false
+    },
+    {
+      "name": "例子贴切",
+      "verdict": "miss",
+      "quote": "",
+      "evidence_unanchored": false
+    },
+    {
+      "name": "表述清楚",
+      "verdict": "miss",
+      "quote": "",
+      "evidence_unanchored": false
+    }
+  ],
+  "marks": [
+    {
+      "id": 1,
+      "quote": "用你自己的话解释「机会成本」是什么",
+      "level": "major",
+      "note": "这一句是题面原文，不是作答；整份材料都是题目的复制，没有一句属于他自己。",
+      "anchored": true,
+      "partial": false,
+      "start": 3,
+      "end": 20,
+      "level_fixed": false,
+      "dropped_overlap": false
+    }
+  ],
+  "anchored_ratio": 1.0
+}
