@@ -69,7 +69,7 @@ grading/
 
 - `name` 非空、互不重复；`points` 是不小于 0 的整数，可省略。
 - **要么每条都带 `points` 且合计等于 `max`，要么每条都不带**；一半带一半不带，`rubric set` 退出 1 并保留旧表。
-- 不带分值时 `points` 只受 `0 <= points <= max` 约束，「分数与条目判定一致」这条闸门失效。
+- 不带分值时「分数与条目判定一致」这条闸门失效，`points` 只受 `0 <= points <= max` 约束，外加两条底线：`hit` / `partial` 的引文锚不回作答就**整份退回**（算不出降级该扣多少）；条目全部 `miss` 而 `points > 0` 拒收（分数没有任何条目撑着）。
 
 `rubric set --from` 读的文件可以是 `{"criteria": [...]}`，也可以直接是数组。
 
@@ -94,7 +94,7 @@ grading/
 | 键 | 契约 |
 |---|---|
 | `context_hash` | `context` 命令输出里的那一串，原样抄。必须等于当前重算值，否则拒收 |
-| `points` | 整数，`0 <= points <= max`；条目带分值时必须等于合计（见下） |
+| `points` | 整数，`0 <= points <= max`；条目带分值时必须等于合计（见下），不带分值时条目全部 `miss` 就必须是 0 |
 | `summary` | 字符串，`lang: zh` 按字、`lang: en` 按词计，长度须在 **60–200** 之间；不得出现「第 N 题」式逐题复述 |
 | `criteria` | 数组，与条目表**一一对应，不多不少不重复**；每项只接受 `name` / `verdict` / `quote` |
 | `marks` | 数组，条数 ≤ `max_notes`；每项只接受 `quote` / `level` / `note` |
@@ -102,7 +102,7 @@ grading/
 `criteria[]`：
 
 - `verdict` ∈ `hit` / `partial` / `miss`。
-- `quote` 从作答里**原样复制**。判 `hit` 或 `partial` 必须给非空引文，且引文必须能锚回作答原文；锚不上时该条降为 `miss` 并记 `evidence_unanchored: true`，若因此分数变了就整份退回重批。判 `miss` 时 `quote` 可以是空串。
+- `quote` 从作答里**原样复制**。判 `hit` 或 `partial` 必须给非空引文，且引文必须能锚回作答原文；锚不上时该条降为 `miss` 并记 `evidence_unanchored: true`，若因此分数变了就整份退回重批。条目表不带分值时算不出「降级该扣多少」，锚不上直接整份退回。判 `miss` 时 `quote` 可以是空串。
 - 分数合计：`hit` 拿该条满分、`partial` 拿一半向下取整、`miss` 拿 0。
 
 `marks[]`：

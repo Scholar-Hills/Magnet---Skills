@@ -348,7 +348,7 @@ def t_oracle_broken_must_miss(root):
 
 
 def t_oracle_pass_stamps(root):
-    """合格的 oracle 盖章：四份材料的哈希都记下来。"""
+    """合格的 oracle 盖章：五份材料的哈希都记下来。"""
     job = make_job(root, "gate-oracle-04", oracle=False)
     rc, out = stamp_oracle(job)
     check(rc == 0, "合格的 oracle 应退出 0，rc=%d\n%s" % (rc, out))
@@ -455,7 +455,7 @@ def t_grade_partial_halves(root):
 
 
 def t_grade_unscored_criteria(root):
-    """条目表不带分值时，points 只受 0 <= points <= max 约束。"""
+    """条目表不带分值时：points 只受 0 <= points <= max 约束，但两条底线要守住。"""
     job = make_job(root, "gate-unscored-01",
                    criteria=[{"name": "定义准确"}, {"name": "例子具体"}, {"name": "结论呼应"}])
     submit(job, "a01", body_for(job, "a01", points=5, verdicts=("hit", "hit", "miss")))
@@ -467,6 +467,70 @@ def t_grade_unscored_criteria(root):
     rc, out = say("grade", job, "a01")
     check(rc == 1, "超过满分仍应退出 1，rc=%d\n%s" % (rc, out))
     check("5" in out, "应写清满分是 5，实际输出：\n%s" % out)
+
+    # 底线一：hit 的引文锚不到就整份退回——算不出降级该扣多少，不能只 WARN 放行
+    submit(job, "a01", body_for(job, "a01", points=5, verdicts=("hit", "hit", "miss"),
+                                quotes={"定义准确": "作答里根本没有这句话甲乙丙"}))
+    rc, out = say("grade", job, "a01")
+    check(rc == 1, "不带分值时引文锚不到应整份退回，rc=%d\n%s" % (rc, out))
+    check("定义准确" in out, "应指名是哪一条的引文锚不到，实际输出：\n%s" % out)
+    check("没标分值" in out, "应说清是不带分值才整份退回，实际输出：\n%s" % out)
+
+    # 底线二：条目全 miss 却给了分——这个分数没有任何条目撑着
+    submit(job, "a01", body_for(job, "a01", points=3, verdicts=("miss", "miss", "miss"),
+                                summary=SUMMARY_ZERO))
+    rc, out = say("grade", job, "a01")
+    check(rc == 1, "全 miss 却给 3 分应退出 1，rc=%d\n%s" % (rc, out))
+    check("撑" in out, "应说清分数没有条目撑着，实际输出：\n%s" % out)
+
+    submit(job, "a01", body_for(job, "a01", points=0, verdicts=("miss", "miss", "miss"),
+                                summary=SUMMARY_ZERO))
+    rc, out = say("grade", job, "a01")
+    check(rc == 0, "全 miss 且 0 分应照常放行，rc=%d\n%s" % (rc, out))
+
+
+def t_docx_extraction(root):
+    """docx 抽取：制表符不吞邻字、表格文字按段落读出、文本框（Choice/Fallback）只读一次。"""
+    import zipfile as zf
+    import grader
+    doc = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+        ' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
+        ' xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">'
+        '<w:body>'
+        '<w:p><w:r><w:t>甲</w:t></w:r><w:r><w:tab/><w:t>乙</w:t></w:r></w:p>'
+        '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>表格里的句子</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+        '<w:p><w:r><w:t>正文段落有文本框。</w:t></w:r>'
+        '<w:r><mc:AlternateContent>'
+        '<mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent>'
+        '<w:p><w:r><w:t>文本框里的句子</w:t></w:r></w:p>'
+        '</w:txbxContent></wps:txbx></w:drawing></mc:Choice>'
+        '<mc:Fallback><w:pict><w:txbxContent>'
+        '<w:p><w:r><w:t>文本框里的句子</w:t></w:r></w:p>'
+        '</w:txbxContent></w:pict></mc:Fallback>'
+        '</mc:AlternateContent></w:r></w:p>'
+        '</w:body></w:document>'
+    )
+    path = os.path.join(root, "docx-01.docx")
+    with zf.ZipFile(path, "w") as pack:
+        pack.writestr("word/document.xml", doc)
+    text = grader.docx_text(path)
+    check("<" not in text and ">" not in text, "抽出的正文不应有 XML 标签碎片，实际 %r" % text)
+    check("甲\t乙" in text, "制表符应保留且不吞邻字，实际 %r" % text)
+    check(text.count("表格里的句子") == 1, "表格文字应恰好读一次，实际 %r" % text)
+    check(text.count("文本框里的句子") == 1,
+          "文本框文字应恰好读一次（Fallback 整棵跳过、内层 w:p 不再当顶层段落），实际 %r" % text)
+    check(text.count("正文段落有文本框。") == 1, "外层段落文字应恰好一次，实际 %r" % text)
+
+
+def t_grade_student_slug(root):
+    """学号拼进 answers/ 与 results/ 的文件名：slug 口径之外（大写、点号、路径穿越）退出 2。"""
+    job = make_job(root, "gate-slug-01")
+    for bad in ("../a01", "A01", "a01.md", "学号一"):
+        rc, out = say("grade", job, bad)
+        check(rc == 2, "学号 %r 应退出 2，rc=%d\n%s" % (bad, rc, out))
+        check("学号" in out, "应说明学号的口径，实际输出：\n%s" % out)
 
 
 def t_grade_marks_cap(root):
@@ -515,6 +579,12 @@ def t_grade_summary_len(root):
     rc, out = say("grade", job, "a01")
     check(rc == 1, "总评里逐题复述应退出 1，rc=%d\n%s" % (rc, out))
     check("第 2 题" in out, "应把逐题复述的那一处摘出来，实际输出：\n%s" % out)
+
+    # 逐题复述的字符类与 self-grader 对齐：全角数字位数不限、〇 也认，普通句子不误报
+    import grader as g
+    check(g.PER_ITEM_RECAP.search("第１２３４题的定义写得含糊") is not None, "全角多位数字应命中")
+    check(g.PER_ITEM_RECAP.search("第〇问没有作答") is not None, "〇 应命中")
+    check(g.PER_ITEM_RECAP.search("这道题整体答得有条理") is None, "普通句子不应误报")
 
     # 计数口径按 job.json 的 lang 走：同一段 70 个英文词，en 合规、zh 因字数超上限不合规
     import grader
@@ -765,6 +835,8 @@ SELFTESTS = (
     t_grade_evidence_warn_half,
     t_grade_partial_halves,
     t_grade_unscored_criteria,
+    t_docx_extraction,
+    t_grade_student_slug,
     t_grade_marks_cap,
     t_grade_anchor_ratio,
     t_grade_summary_len,

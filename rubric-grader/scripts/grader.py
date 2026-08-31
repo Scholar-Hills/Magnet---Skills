@@ -32,6 +32,7 @@ import os
 import re
 import sys
 import zipfile
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import anchor  # noqa: E402
@@ -72,7 +73,17 @@ BASE_PREFIX = "base-"
 ANSWER_EXTS = (".md", ".txt", ".html", ".htm", ".docx")
 
 # 「第 3 题」式逐题复述：总评是给这一份作答的整体评价，不是把评分标准再抄一遍。
-PER_ITEM_RECAP = re.compile(r"第\s*[0-9０-９一二三四五六七八九十百]{1,3}\s*[题題问問]")
+# 字符类与 selfgrade.py 的 _RECAP 同款：半角与全角数字、〇 与中文数字，位数不设上限。
+PER_ITEM_RECAP = re.compile(r"第\s*[0-9０-９〇一二三四五六七八九十百]+\s*[题題问問]")
+
+# 学号（含对抗基线名）会拼进 answers/ 与 results/ 的文件名，按 red-pen 的 slug 口径校验。
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+# docx：只读 word/document.xml 里的文字段落
+WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+WORD_MAIN = "word/document.xml"
+# 同一段内容的两种画法：新版画在 mc:Choice 里，旧版在 mc:Fallback 里兜底。两边都读等于复制一份。
+MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
 
 
 # ---------------------------------------------------------------- 小工具
@@ -151,17 +162,60 @@ def jaccard(left, right):
     return round(len(left & right) / len(union), 4) if union else 0.0
 
 
+def _docx_paragraphs(node):
+    """按文档顺序产出顶层 w:p；文本框里的 w:p 归外层那一段，mc:Fallback 整棵跳过。
+
+    文本框的 w:p 嵌在外层 w:p 之下，若把它当顶层段落再枚举一遍，同一句话就会
+    被读第二次；而 Choice 与 Fallback 各带一份同样的文字，两边都读又乘二。
+    所以遇到 w:p 就产出它、不再往里钻，遇到 mc:Fallback 直接绕过整棵子树。
+    """
+    for child in node:
+        if child.tag == MC_FALLBACK:
+            continue
+        if child.tag == WORD_NS + "p":
+            yield child
+        else:
+            for found in _docx_paragraphs(child):
+                yield found
+
+
+def _docx_line(node, parts):
+    """一段里的文字：w:t 拼起来，w:br / w:cr 换行，w:tab 制表；Fallback 同样绕过。"""
+    for child in node:
+        if child.tag == MC_FALLBACK:
+            continue
+        if child.tag == WORD_NS + "t":
+            parts.append(child.text or "")
+        elif child.tag in (WORD_NS + "br", WORD_NS + "cr"):
+            parts.append("\n")
+        elif child.tag == WORD_NS + "tab":
+            parts.append("\t")
+        _docx_line(child, parts)
+    return parts
+
+
 def docx_text(path):
-    """docx 只抽段落文字（zipfile + 正则），图片与图表里的内容抽不出来，也不猜。"""
+    """docx 只用 zipfile + xml：读 word/document.xml，按 w:p 切段。
+
+    表格按段落读出来（只丢表结构，文字一个不少）；文本框里的文字按它在正文里
+    锚着的位置读一次。图片与图表里的内容抽不出来，也不猜。
+    """
     try:
         with zipfile.ZipFile(path) as pack:
-            raw = pack.read("word/document.xml").decode("utf-8", "replace")
-    except (KeyError, OSError, zipfile.BadZipFile) as e:
+            raw = pack.read(WORD_MAIN)
+    except KeyError:
+        raise UsageError("这个 .docx 里没有 %s，不像是 Word 文档：%s" % (WORD_MAIN, path))
+    except zipfile.BadZipFile:
+        raise UsageError("这个文件不是有效的 .docx（打不开压缩包）：%s" % path)
+    except OSError as e:
         raise UsageError("读不出 docx 的正文：%s（%s）" % (path, e))
+    try:
+        root = ET.fromstring(raw.decode("utf-8", "replace"))
+    except ET.ParseError as e:
+        raise UsageError("这个 .docx 的正文 XML 解析失败：%s（%s）" % (path, e))
     lines = []
-    for block in re.findall(r"<w:p[^>]*>(.*?)</w:p>", raw, re.S):
-        joined = "".join(re.findall(r"<w:t[^>]*>(.*?)</w:t>", block, re.S))
-        line = html.unescape(joined).strip()
+    for para in _docx_paragraphs(root):
+        line = "".join(_docx_line(para, [])).strip()
         if line:
             lines.append(line)
     if not lines:
@@ -174,6 +228,13 @@ def read_answer(path):
     if path.lower().endswith(".docx"):
         return docx_text(path)
     return read_text(path)
+
+
+def check_student(student):
+    """学号要拼进 answers/ 与 results/ 的文件名，按 slug 口径校验，一步不许穿越目录。"""
+    if not SLUG_RE.match(student or ""):
+        raise UsageError("学号只能是小写字母、数字与连字符（不超过 64 位），当前是：%r" % student)
+    return student
 
 
 # ---------------------------------------------------------------- 题批次
@@ -378,6 +439,8 @@ def gate_points(job, payload, ordered):
     if want is not None and want != points:
         errors.append("points 与条目判定对不上：按条目分值应为 %d，提交的是 %d"
                       "（hit 拿满分、partial 拿一半向下取整、miss 拿 0）" % (want, points))
+    if want is None and points > 0 and verdicts and all(v == "miss" for v in verdicts):
+        errors.append("条目全部未命中，却给了 %d 分——分数没有任何条目撑着" % points)
     return errors
 
 
@@ -385,7 +448,8 @@ def gate_criteria(job, answer_text, payload, ordered):
     """闸门 3：条目一一对应；hit / partial 的引文必须能锚回作答原文。
 
     锚不到的照规矩降为 miss 并记 evidence_unanchored；若因此分数变了就整份退回，
-    让 Agent 重批 —— 不许脚本替它把分数改小。
+    让 Agent 重批 —— 不许脚本替它把分数改小。条目表不带分值时算不出「降级该扣
+    多少」，引文一锚不到就整份退回（与 self-grader 的底线一致）。
     """
     errors, cautions, normalized = [], [], []
     if ordered is None:
@@ -414,7 +478,10 @@ def gate_criteria(job, answer_text, payload, ordered):
         want = job.expected_points([c["verdict"] for c in normalized])
         given = payload.get("points")
         detail = "、".join("「%s」" % n for n in degraded)
-        if want is not None and is_int(given) and want != given:
+        if not job.weighted:
+            errors.append("条目表没标分值，脚本算不出证据落空该扣多少分，引文一锚不到就整份退回："
+                          "%s。换一句真的在作答里的引文，或者如实判未命中" % detail)
+        elif want is not None and is_int(given) and want != given:
             errors.append("条目%s判了 hit / partial，引文却锚不回作答原文，按规矩降为 miss；"
                           "降完分数从 %d 变成 %d，整份退回重批" % (detail, given, want))
         else:
@@ -827,7 +894,8 @@ def cmd_init(args):
     print("下一步：")
     print("  1. 把题干写进 %s，把评分标准逐字粘进 %s" % (QUESTION_FILE, RUBRIC_FILE))
     print("  2. 帮老师把评分标准整理成条目表，老师确认后："
-          "grader.py rubric set %s --from inbox/criteria.json" % args.job_dir)
+          "grader.py rubric set %s --from %s"
+          % (args.job_dir, os.path.join(args.job_dir, "inbox", "criteria.json")))
     print("  3. 把满分范例放 %s、残缺版放 %s，缺哪几条写进 %s"
           % (ORACLE_FULL, ORACLE_BROKEN, ORACLE_BROKEN_LIST))
     print("  4. 学生作答放 answers/<学号>.md（对抗基线用 %s 开头的文件名）" % BASE_PREFIX)
@@ -977,7 +1045,7 @@ def cmd_grade(args):
     if not job.criteria:
         raise UsageError("条目表还是空的，请先跑 grader.py rubric set")
     require_stamp(job)
-    student = args.student
+    student = check_student(args.student)
     answer_text = job.answer_of(student)
     inbox = job.path("inbox", "grade-%s.json" % student)
     if not os.path.isfile(inbox):
