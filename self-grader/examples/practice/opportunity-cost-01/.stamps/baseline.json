@@ -1,0 +1,11 @@
+{
+  "question": "335f124b0b4ed87f041b0e60fc808fe7b896517b29d9fb5b4727dcee95d4a003",
+  "rubric": "a1089bc349c9570a5094e83de35629000097761e70aba0f0b9333abae65e878b",
+  "criteria": "70f3b7d03666dd59430155300fe79a2df8e66b62e1e88b9f44b482835519a08e",
+  "checkedAt": "2026-08-31",
+  "baselines": [
+    "base-empty",
+    "base-echo",
+    "base-noise"
+  ]
+}

@@ -447,6 +447,42 @@ def t_check_progress_tamper(root):
     return "progress 行被改 / 整行缺失 → check 退出 1；放回原样即恢复"
 
 
+def t_check_result_tamper(root):
+    """result.json 里的锚定结论是引擎说了算：手改 anchored 或分数，check 都要报出来。"""
+    ws = new_ws(root)
+    write(os.path.join(ws, "attempts", "01", "answer.md"), ANSWER_01)
+    pass_baselines(root, ws)
+    marks = [{"quote": Q_OCCUPY, "level": "minor", "note": "这一层可以再往前推一句，说明轮流的好处。"},
+             {"quote": Q_QUEUE, "level": "remark", "note": "结尾偏重复，换成第二条理由更有分量。"}]
+    submit(ws, "01", payload(root, "01", 3,
+                             [("hit", Q_ROTATE), ("miss", ""), ("hit", Q_CASE)], marks=marks))
+    rc, out, err = run(root, "grade", SLUG, "01")
+    check(rc == 0, "前置：attempt 01 应通过，rc=%d\n%s%s" % (rc, out, err))
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "前置：check 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+
+    # 两条 anchored 对调：锚定率一点没变，逐条对账才抓得到
+    path = os.path.join(ws, "attempts", "01", "result.json")
+    rec = load(path)
+    check([m["anchored"] for m in rec["marks"]] == [True, True], "前置：两条都该锚上：%r" % rec["marks"])
+    rec["marks"][0]["anchored"] = False
+    rec["marks"][1]["anchored"] = False
+    rec["anchored_ratio"] = 0.0
+    write_json(path, rec)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1, "手改 anchored 应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("anchored_flag" in gate_names(out, "ERROR"), "应报 anchored_flag 闸门：\n%s" % out)
+
+    # 只改分数：重跑闸门时条目分值算不平
+    rec = load(path)
+    rec["points"] = 5
+    write_json(path, rec)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1, "手改分数应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("replay" in gate_names(out, "ERROR"), "应报 replay 闸门：\n%s" % out)
+    return "手改 anchored（比率同步改掉）/ 手改分数 → check 都退出 1"
+
+
 def t_check_baseline_tamper(root):
     """盖章之后把对抗基线换成真作答 —— 盖章作废，check 与 grade 都拦。"""
     ws = new_ws(root)
@@ -590,7 +626,24 @@ def t_gate_consistency(root):
     rc, out, err = run(root, "grade", SLUG, "01")
     check(rc == 1, "判定值不在白名单应退出 1，rc=%d\n%s%s" % (rc, out, err))
     check("verdict_value" in gate_names(out, "ERROR"), "应报 verdict_value 闸门：\n%s" % out)
-    return "分数与条目不一致 / 超满分 / 条目缺项 / 判定越界 → 都退出 1"
+
+    # 同一个条目名交两次：凑够条数也不算对应上
+    body = payload(root, "01", 3, [("hit", Q_ROTATE), ("miss", ""), ("hit", Q_CASE)])
+    body["criteria"][2]["name"] = body["criteria"][0]["name"]
+    submit(ws, "01", body)
+    rc, out, err = run(root, "grade", SLUG, "01")
+    check(rc == 1, "条目名重复应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("criteria_table" in gate_names(out, "ERROR"), "应报 criteria_table 闸门：\n%s" % out)
+
+    # 顺序换了不算错：条目名才是对应依据，脚本自己排回条目表的顺序
+    body = payload(root, "01", 3, [("hit", Q_ROTATE), ("miss", ""), ("hit", Q_CASE)])
+    body["criteria"] = list(reversed(body["criteria"]))
+    submit(ws, "01", body)
+    rc, out, err = run(root, "grade", SLUG, "01")
+    check(rc == 0, "条目乱序应照常通过，rc=%d\n%s%s" % (rc, out, err))
+    got = [it["verdict"] for it in load(os.path.join(ws, "attempts", "01", "result.json"))["criteria"]]
+    check(got == ["hit", "miss", "hit"], "落盘的条目应按条目表顺序排好，实际 %r" % got)
+    return "分数与条目不一致 / 超满分 / 条目缺项 / 判定越界 / 条目名重复 → 退出 1；乱序 → 排好后通过"
 
 
 def t_gate_evidence(root):
@@ -786,6 +839,7 @@ SELFTESTS = (
     t_progress_append,
     t_regrade_same_attempt,
     t_check_progress_tamper,
+    t_check_result_tamper,
     t_check_baseline_tamper,
     t_no_points_table,
     t_lower_points_warn,

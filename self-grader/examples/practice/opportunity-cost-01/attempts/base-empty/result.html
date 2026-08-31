@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>自批判题卡 · opportunity-cost-01 · attempt base-empty</title><style>
+:root{color-scheme:light dark;--bg:#f6f7f9;--card:#ffffff;--fg:#1f2328;--muted:#656d76;--line:#d0d7de;
+--accent:#0969da;--major:#cf222e;--majorbg:#ffebe9;--minor:#9a6700;--minorbg:#fff8c5;--remark:#0969da;--remarkbg:#ddf4ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--card:#161b22;--fg:#e6edf3;--muted:#8b949e;--line:#30363d;
+--accent:#58a6ff;--major:#f85149;--majorbg:#2d1416;--minor:#d29922;--minorbg:#272115;--remark:#58a6ff;--remarkbg:#0c2d6b}}
+*{box-sizing:border-box}body{margin:0;padding:24px;background:var(--bg);color:var(--fg);
+font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.wrap{max-width:1080px;margin:0 auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:24px 28px}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:20px 0 8px;color:var(--muted)}
+.meta{color:var(--muted);font-size:13px;margin-bottom:16px}
+.cols{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+.doc{flex:3 1 380px;min-width:0;border:1px solid var(--line);border-radius:10px;padding:8px 16px;overflow-x:auto}
+.doc p,.doc li,.doc blockquote{margin:10px 0}
+.side{flex:2 1 300px;min-width:0}
+mark.an{background:transparent;color:inherit;padding:1px 0;border-bottom:2px solid var(--remark)}
+mark.an-major{border-color:var(--major)}mark.an-minor{border-color:var(--minor)}
+mark.an.lit{background:var(--remarkbg)}mark.an-major.lit{background:var(--majorbg)}mark.an-minor.lit{background:var(--minorbg)}
+ol.list{list-style:none;margin:0;padding:0}
+li.item{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px}
+li.item.lit{border-color:var(--accent)}
+.tag{display:inline-block;font-size:12px;font-weight:600;border-radius:999px;padding:1px 9px;margin-right:6px}
+.tag-major{background:var(--majorbg);color:var(--major)}.tag-minor{background:var(--minorbg);color:var(--minor)}
+.tag-remark{background:var(--remarkbg);color:var(--remark)}
+.no{color:var(--muted);font-size:12px}
+.said{margin:6px 0;padding-left:10px;border-left:3px solid var(--line);color:var(--muted);font-size:13px}
+.item p{margin:6px 0}.tip{font-size:13px;color:var(--accent)}
+.empty{color:var(--muted);font-size:13px}
+.foot{margin:20px 0 0;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+</style></head>
+<body><div class="wrap"><h1>自批判题卡 · opportunity-cost-01 · attempt base-empty</h1><div class="meta">得分：0/5　·　日期：2026-08-31　·　锚定率 0%（0/0）</div><div class="cols"><div class="doc"></div><div class="side"><h2>批注（0 条）</h2><p class="empty">没有锚定成功的批注。</p></div></div><p class="foot">批注由脚本锚定，未定位条目脚本不擅自摆放。</p></div><script>
+(function(){
+  var all=document.querySelectorAll('[data-an]');
+  function light(id,on){
+    var group=document.querySelectorAll('[data-an="'+id+'"]');
+    for(var i=0;i<group.length;i++){group[i].classList.toggle('lit',on);}
+  }
+  for(var i=0;i<all.length;i++){
+    (function(el){
+      var id=el.getAttribute('data-an');
+      el.addEventListener('mouseenter',function(){light(id,true);});
+      el.addEventListener('mouseleave',function(){light(id,false);});
+    })(all[i]);
+  }
+})();
+</script></body></html>

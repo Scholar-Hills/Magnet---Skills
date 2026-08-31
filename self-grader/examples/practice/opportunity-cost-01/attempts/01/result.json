@@ -1,0 +1,55 @@
+{
+  "slug": "opportunity-cost-01",
+  "attempt": "01",
+  "checkedAt": "2026-08-31",
+  "points": 2,
+  "max": 5,
+  "summary": "定义这一层写对了：你明确说了机会成本取的是被放弃选项里价值最高的那一个。但下一段又把兼职收入和打球时间相加，这跟你自己刚写下的定义是冲突的，用到题里的那一步只能判未命中。例子那一条现在还停在一句泛泛的感想上，看不出你放弃了什么。下一步先改哪一条：回到题目里，在兼职和打球之间挑出价值最高的那一个，并说清为什么是它。",
+  "criteria": [
+    {
+      "name": "定义准确",
+      "verdict": "hit",
+      "quote": "被放弃的那些选项里价值最高的那一个"
+    },
+    {
+      "name": "用到本题",
+      "verdict": "miss",
+      "quote": ""
+    },
+    {
+      "name": "自举例子",
+      "verdict": "miss",
+      "quote": ""
+    }
+  ],
+  "marks": [
+    {
+      "id": 1,
+      "quote": "两样加在一起就是他这次的机会成本",
+      "level": "major",
+      "note": "你自己的定义说取价值最高的那一个，这里却把两样相加，前后对不上。",
+      "anchored": true,
+      "partial": false,
+      "start": 99,
+      "end": 115,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 2,
+      "quote": "我平时也经常要做这种取舍。",
+      "level": "minor",
+      "note": "这句话没有落到一件具体的事上，读者看不出你放弃的是什么。",
+      "anchored": true,
+      "partial": false,
+      "start": 123,
+      "end": 136,
+      "level_fixed": false,
+      "dropped_overlap": false
+    }
+  ],
+  "anchored_ratio": 1.0,
+  "context_hash": "2c07a195f99f9e695571f27fcc24cce8cf505ed859ac7d94df2978e7ebf6e41d",
+  "answer_hash": "af11b8e0215ecb3fb3be00c686b12b3b31be508dfea6b9acc36fcb588ae936f1",
+  "sameDraft": false
+}

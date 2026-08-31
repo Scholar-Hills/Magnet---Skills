@@ -1,0 +1,30 @@
+{
+  "slug": "opportunity-cost-01",
+  "attempt": "base-noise",
+  "checkedAt": "2026-08-31",
+  "points": 0,
+  "max": 5,
+  "summary": "这一段文字讲的是天气与路况，和题目问的机会成本没有任何关系，既没有定义、也没有对本题三个选项做出取舍，更谈不上举例说明，因此三个条目全部未命中，总分为零。下一步先改哪一条：回到题目本身，先回答他放弃了什么、其中哪一项价值最高。",
+  "criteria": [
+    {
+      "name": "定义准确",
+      "verdict": "miss",
+      "quote": ""
+    },
+    {
+      "name": "用到本题",
+      "verdict": "miss",
+      "quote": ""
+    },
+    {
+      "name": "自举例子",
+      "verdict": "miss",
+      "quote": ""
+    }
+  ],
+  "marks": [],
+  "anchored_ratio": 0.0,
+  "context_hash": "a7ecbbdc79d467e6ac909f307b65c94177914c91048b239d8acd240152aa6f25",
+  "answer_hash": "1d3a229f1a944d69c9dc1602ced0a31af346834005c462504e1f2fed5a645775",
+  "sameDraft": false
+}
