@@ -1,0 +1,102 @@
+{
+  "slug": "newsletter-01",
+  "version": 1,
+  "at": "2026-08-31T16:31:01",
+  "draft_file": "draft.md",
+  "draft_sha256": "405c359756599b4c1ae84b7bb7a1c7e50129bc2b73432ca68c5451bb9ecdc12e",
+  "context_hash": "03422eb47c130a91c89e28aa557edc90098e5a9970ceb3302acbc413f94cdb5c",
+  "anchored_ratio": 0.8571,
+  "level_counts": {
+    "major": 2,
+    "minor": 3,
+    "remark": 2
+  },
+  "marks": [
+    {
+      "id": 1,
+      "quote": "有人一口气报了五门，也有人一门都没报",
+      "level": "minor",
+      "note": "开头的对比立得住，但两边都只有数字。补一个具体场景，读者才认出自己。",
+      "anchored": true,
+      "partial": false,
+      "start": 47,
+      "end": 65,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 2,
+      "quote": "我们和十几位家长聊下来，发现真正让人后悔的往往不是选错了机构",
+      "level": "major",
+      "note": "「十几位」是全文唯一的依据，通勤路上的读者会立刻追问是怎么找的、问了什么。",
+      "fix": "写清样本怎么来的，例如「在两所小学门口随机聊了十四位家长」。",
+      "anchored": true,
+      "partial": false,
+      "start": 78,
+      "end": 108,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 3,
+      "quote": "第三种是占时间，家长下班晚，需要一个安全的地方把孩子放到六点。",
+      "level": "remark",
+      "note": "这一种最真实，也最难开口承认。补一句「这没什么不好」，读者才不会觉得被审判。",
+      "anchored": true,
+      "partial": false,
+      "start": 216,
+      "end": 247,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 4,
+      "quote": "把一周的作业量、睡眠、通勤先摆上去",
+      "level": "minor",
+      "note": "「时间账本」是全文最好的说法，可惜只给了名字，没给一份填好的样子。",
+      "fix": "就地摆一周的格子，例如「作业二十小时、睡眠六十三小时、通勤五小时」。",
+      "anchored": true,
+      "partial": false,
+      "start": 315,
+      "end": 332,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 5,
+      "quote": "问不清楚的先不报",
+      "level": "major",
+      "note": "这是全篇最能直接照做的一句，却被塞在长句尾巴上，手机上一划就过去了。",
+      "fix": "拎出来单独成段，前面加一句「这条最省钱」。",
+      "anchored": true,
+      "partial": false,
+      "start": 398,
+      "end": 406,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 6,
+      "quote": "这三样比宣传册上的师资介绍更能说明问题",
+      "level": "minor",
+      "note": "结论比证据走得远了半步，怕被读成推销的反面。退半步反而更可信。",
+      "fix": "改成「这三样至少比师资介绍更容易当场验证」。",
+      "anchored": true,
+      "partial": false,
+      "start": 485,
+      "end": 504,
+      "level_fixed": false,
+      "dropped_overlap": false
+    },
+    {
+      "id": 7,
+      "quote": "家长最该问的问题是这门课能不能提分",
+      "level": "remark",
+      "note": "这句和上一段的结论重复了，留一处就够，建议删掉靠后的那处。",
+      "anchored": false,
+      "partial": false,
+      "level_fixed": false,
+      "dropped_overlap": false
+    }
+  ]
+}
