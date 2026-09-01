@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "createdAt": "2026-09-01T01:55:33Z",
+  "files": {
+    "intro.md": "86abda2d33abf91aa71117942644c6c330fbeb1e2f5cc6d2c3f87e9d20f01dc1",
+    "body-01.md": "1fa49da2fd9364909a1df7c5ee18eaaf75ce2e8b8a791bb1be5fd5d0e5df3e07",
+    "body-02.md": "75eb6d1d0ecce2fb269598eaf27413b2fe96da414b87a1f13543c8e34ba3b410",
+    "body-03.md": "ac295e6b6724c98a1bf1de088dc518a09f2dcaf85e8d03a0e6eba9cbb4a50c1a",
+    "body-04.md": "b45b8a1e2cbeaf65876f829624b19b71c6ead77bc1376ced4896212abe6748b2",
+    "body-05.md": "286f07aef41bfd7c4c3d68f546ca7a09f4a2d907e7521a638d0733573917d15a",
+    "body-06.md": "7e7e23f1c6c0e08c8a6d36f997944cc94a8ec784edc2feac7f15a2b5630f959e",
+    "conclusion.md": "4f58474a6c01f31967bc57e1f6f1f851acd69e8f3edafb239357da8d2c49b19b"
+  }
+}

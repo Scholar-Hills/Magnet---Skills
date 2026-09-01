@@ -1,0 +1,42 @@
+{
+  "outline.jsonl": {
+    "seq": 1,
+    "hash": "8713c2f8f2d738f3e0474b9e47d0ca0e093a45d93d58b41fe5fd4346103658c7"
+  },
+  "ledger/intro.jsonl": {
+    "seq": 3,
+    "hash": "deecece79f1b306e17e4bb5ed3220d2a2eab346aa138db5725262c38dc9c8976"
+  },
+  "ledger/body-01.jsonl": {
+    "seq": 2,
+    "hash": "4730f6a2a32afe4a71aa21f79557e6fa0e5cfac6c0f52efc65d73eb517fa5173"
+  },
+  "ledger/body-02.jsonl": {
+    "seq": 2,
+    "hash": "477671ccc801f4db12a8102519c084137191d6fc955d20a48a24873e1255bff6"
+  },
+  "ledger/body-03.jsonl": {
+    "seq": 2,
+    "hash": "2969386a9a9708a74aeb031e60072f3c59a613c8f78c99cd10b9fc50a4449817"
+  },
+  "ledger/body-04.jsonl": {
+    "seq": 2,
+    "hash": "f3337436ed7ccf4c2d9a4d2d89b3ea0ddaae77ca6ff04a337e795bcb90e7d6e9"
+  },
+  "ledger/body-05.jsonl": {
+    "seq": 2,
+    "hash": "cdaa0e9658cfadede5148666f4cd1a25be60a2f5f93c299f4466057bd27da4ad"
+  },
+  "ledger/body-06.jsonl": {
+    "seq": 2,
+    "hash": "7c56878b9885d9487246bdcb5e27bb02ddd8d4525da74d432542a9c394a661dc"
+  },
+  "ledger/conclusion.jsonl": {
+    "seq": 3,
+    "hash": "691005d84042a048238a314937c9763667246bdb1f7daf323ea04fe60f0e9f82"
+  },
+  "reflections.jsonl": {
+    "seq": 2,
+    "hash": "29590fdeacdfa33c7002e94ee541c159ced1d40519639a3aa3cd4ea2a7fa2ee1"
+  }
+}

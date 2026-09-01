@@ -1,0 +1,139 @@
+{
+  "slug": "remote-work-cities-01",
+  "title": "远程办公者该怎么选城市",
+  "genre": "议论文",
+  "level": "本科通识写作课",
+  "setting": "untimed",
+  "targetWords": 1200,
+  "background": "写作课的期末长作业，允许查资料，交之前可以改三稿。",
+  "thesis": "远程办公只是把「离公司多近」从选城市的清单上划掉，并没有替你补上新的一条。",
+  "createdAt": "2026-09-01T01:55:32Z",
+  "segments": [
+    {
+      "name": "intro",
+      "subquestion": "开头段：交代题目、给出主论点。",
+      "start": 37,
+      "end": 484,
+      "blocks": [
+        2
+      ]
+    },
+    {
+      "name": "body-01",
+      "subquestion": "房租与生活成本的差价，摊到一年之后还剩多少？",
+      "start": 486,
+      "end": 1005,
+      "blocks": [
+        3
+      ]
+    },
+    {
+      "name": "body-02",
+      "subquestion": "网络与临时办公条件能不能撑住全职远程的下限？",
+      "start": 1007,
+      "end": 1454,
+      "blocks": [
+        4
+      ]
+    },
+    {
+      "name": "body-03",
+      "subquestion": "团队所在的时区会怎样决定你一天的形状？",
+      "start": 1456,
+      "end": 1930,
+      "blocks": [
+        5
+      ]
+    },
+    {
+      "name": "body-04",
+      "subquestion": "一年算下来的真实成本与退出成本各是多少？",
+      "start": 1932,
+      "end": 2283,
+      "blocks": [
+        6
+      ]
+    },
+    {
+      "name": "body-05",
+      "subquestion": "通勤取消之后，日常社交要靠什么重新长出来？",
+      "start": 2285,
+      "end": 2828,
+      "blocks": [
+        7
+      ]
+    },
+    {
+      "name": "body-06",
+      "subquestion": "医保、租房、就学、签证这些手续会不会把一座城市直接划掉？",
+      "start": 2830,
+      "end": 3277,
+      "blocks": [
+        8
+      ]
+    },
+    {
+      "name": "conclusion",
+      "subquestion": "结论段：收束全文，回到主论点。",
+      "start": 3279,
+      "end": 3756,
+      "blocks": [
+        9
+      ]
+    }
+  ],
+  "outside": [
+    {
+      "start": 0,
+      "end": 35,
+      "role": "block"
+    },
+    {
+      "start": 35,
+      "end": 37,
+      "role": "space"
+    },
+    {
+      "start": 484,
+      "end": 486,
+      "role": "space"
+    },
+    {
+      "start": 1005,
+      "end": 1007,
+      "role": "space"
+    },
+    {
+      "start": 1454,
+      "end": 1456,
+      "role": "space"
+    },
+    {
+      "start": 1930,
+      "end": 1932,
+      "role": "space"
+    },
+    {
+      "start": 2283,
+      "end": 2285,
+      "role": "space"
+    },
+    {
+      "start": 2828,
+      "end": 2830,
+      "role": "space"
+    },
+    {
+      "start": 3277,
+      "end": 3279,
+      "role": "space"
+    },
+    {
+      "start": 3756,
+      "end": 3757,
+      "role": "space"
+    }
+  ],
+  "fallback": false,
+  "sourceFile": "source.txt"
+}
