@@ -1,6 +1,6 @@
 {
   "step": "deck",
-  "at": "2026-09-01T09:40:30",
+  "at": "2026-09-01T11:21:38",
   "hashes": {
     "lesson.json": "3e0f21af40d7fbe424395dedcf5c3fd197310eb334fe778ce813ea92eea97785",
     "questions.json": "b8c5f6a980fb309963eaeb9fe7e01a6270505fda2ff13c628bf3d2033c537902",
@@ -15,7 +15,7 @@
     "pages/p04.html": "e6231924758bbf5ca0456e012b85b2bda5d838e1dc7401bf9af3899fd7703dff",
     "pages/p04.notes.md": "b35d65aaaca2aa2ed7ec924efc49153a658c18ee25f628f7a43df4874dcf2d61",
     "pages/p05.html": "9cc218f2074dba23ae77cf8baa4a25bacda3c9cac4e2e2a0696e9ebeee5142ac",
-    "pages/p05.notes.md": "c589bf783fe172082aa6fec3c3534007f46789dfa9ffe8d4c64aa0274cedb0c1",
+    "pages/p05.notes.md": "24ddf0dec24a8fa68ade39905d6279ce29ab59fb19235c266e9adbfcd31e25b9",
     "pages/p06.html": "b0afbb05cb51a0a5d2475da47ab73b9c4b4ecbcf010660dfe65a49accb6006e9",
     "pages/p06.notes.md": "5ad033e69355b428fbbd0ba2ac9190035b57c4f7802637364bbab0ffa0465093",
     "pages/p07.html": "fb65e1d84ffc0d0e18b86bb320d363b71efcdcdf3e7fd8a95e55f592d638ec99",
@@ -25,7 +25,7 @@
     "pages/p09.html": "9767eaced52943ba2658f78ef88a336503dd7e6b84b39be916eb1adbc830d407",
     "pages/p09.notes.md": "7ce9206166df451918c451d5a743c91fb368df51e9a2d6d4230c27446ac82ae0",
     "deck.html": "8acccef1f1600cd744059bda3bd36bb8641b6467b52ef2ea649e89d12b106bc2",
-    "notes.html": "1acb3c5c3a03c78ee9201b41fb9e22d6241b8301dcec10d78fd947b6064d50df"
+    "notes.html": "d7712fcd36f6793091c8d9baa2d73628f4b528fb6b2b6d0eabbd05a788dea33e"
   },
   "palette": "cyan",
   "failedPages": [],
