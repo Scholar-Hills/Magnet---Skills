@@ -839,6 +839,28 @@ def t_cheats(root):
     expect_fail(root, "cheat-copy", ("check", "cheat-copy", "pages"), "抄正文当讲稿")
     notes.append("③讲稿复制正文 → 抄正文当讲稿")
 
+    # ③b 讲稿抄大半正文再添几句：重合率钉在 COPY_RATIO 与 1.00 之间，闸门必须照样判死。
+    #    ③ 是逐字复制（重合率 1.00），把 COPY_RATIO 悄悄抬到 0.999 它也照样红，
+    #    等于没钉住边界；这条用例专治那个变异。
+    sys.path.insert(0, HERE)
+    import lessonkit                                             # noqa: E402
+    near_tail = ("下面这些句子是讲稿自己的话：先请两位同学各复述一遍，再留半分钟自由提问，"
+                 "然后请大家把桌上的练习册翻到对应那页，圈出容易写错的两个词，"
+                 "最后板书擦干净，准备进入气压与沸点那一页。")
+    near_copy = body[: int(len(body) * 0.9)] + "\n" + near_tail
+    ratio = lessonkit.overlap_ratio(lessonkit.bigrams(near_copy), lessonkit.bigrams(body))
+    check(lessonkit.COPY_RATIO < ratio < 0.97,
+          "边界用例失守：重合率 %.3f 应落在 COPY_RATIO=%.2f 与 0.97 之间，"
+          "否则这条用例退化成逐字复制、钉不住边界" % (ratio, lessonkit.COPY_RATIO))
+    check(lessonkit.text_len(near_copy) >= lessonkit.text_len(body),
+          "边界用例的讲稿字数应不少于正文，免得先撞上字数闸")
+    pages = base_pages()
+    pages[1]["notes"] = near_copy
+    make(root, "cheat-nearcopy", pages=pages)
+    steps_ok(root, "cheat-nearcopy", "phases")
+    expect_fail(root, "cheat-nearcopy", ("check", "cheat-nearcopy", "pages"), "抄正文当讲稿")
+    notes.append("③b 讲稿抄 %.0f%% 正文再添新话（重合率 %.2f）→ 抄正文当讲稿" % (90, ratio))
+
     # ④ 讲稿只有一个字
     pages = base_pages()
     pages[1]["notes"] = "讲\n"

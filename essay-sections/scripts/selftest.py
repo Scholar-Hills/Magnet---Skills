@@ -953,6 +953,11 @@ def t_rebuild_never_launders_deletion(root):
     refuses("整条账本清空", "")
     refuses("整条账本只剩空白", "\n\n")
 
+    # 末行被改（行数没变）同理：重建就是替篡改者盖章，必须拒绝且不指路
+    tampered = kept[-1].replace("第 3 次评审", "第 3 次评审（悄悄改一笔）")
+    check(tampered != kept[-1], "构造篡改行失败：末行里没找到要改的子串")
+    refuses("篡改末行", "\n".join(kept[:-1] + [tampered]) + "\n")
+
     os.remove(path)
     frozen = read(chains_path)
     rc, out, err = run(root, "check", SLUG, "--rebuild-index")
@@ -961,7 +966,7 @@ def t_rebuild_never_launders_deletion(root):
 
     write(path, good)
     ok(root, "check", SLUG)
-    return "删末行 / 删两行 / 清空 / 删文件：--rebuild-index 一律拒绝、不动索引、不指路，还原后复绿"
+    return "删末行 / 删两行 / 清空 / 篡改末行 / 删文件：--rebuild-index 一律拒绝、不动索引、不指路，还原后复绿"
 
 
 def t_reflect_trigger(root):
