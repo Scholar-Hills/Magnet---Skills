@@ -18,8 +18,8 @@
    生产的枚举值一律小写，而母仓 CLI 报告里的 `ERROR` / `WARN` 是既有约定，不能误伤。
 
 用法：`python3 tools/banned_words.py <目录>`；干净时不输出、退出 0，有命中时逐条打印、
-退出 1。三个 Skill 各带一份同字节的拷贝，`tools/check_engine_sync.py` 断言它们一致。
-扫描会跳过本文件自身（词表本来就写着这些词）。
+退出 1。五个 Skill 的 `scripts/` 与母仓 `tools/` 各带一份同字节的拷贝（共六份），
+`tools/check_engine_sync.py` 断言它们一致。扫描会跳过本文件自身（词表本来就写着这些词）。
 """
 
 import argparse

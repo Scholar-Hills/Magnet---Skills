@@ -1061,6 +1061,19 @@ def t_hygiene():
     return "G14：禁用词静态闸 0 命中，本批次追加表 %d 条 0 命中" % len(BATCH_BANNED)
 
 
+def t_engine_sync():
+    """母仓内共享文件同步闸必须绿；单 Skill 独立安装（没有 tools/）时跳过不报错。"""
+    gate = os.path.join(os.path.dirname(SKILL_DIR), "tools", "check_engine_sync.py")
+    if not os.path.isfile(gate):
+        return "共享文件同步闸 SKIP：tools/check_engine_sync.py 不在（单 Skill 安装），由母仓负责跑"
+    proc = subprocess.run([PY, gate], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          universal_newlines=True)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    check(proc.returncode == 0, "共享文件同步闸未过：\n%s" % out)
+    check("banned_words.py" in out, "同步闸输出里应点名 banned_words.py：\n%s" % out)
+    return "共享文件同步闸通过（banned_words.py 六份同字节）"
+
+
 def t_doctor(root):
     res = run("doctor", cwd=root)
     check(res[0] == 0, "doctor 应退出 0，实际 %d\n%s" % (res[0], both(res)))
@@ -1151,6 +1164,7 @@ def main():
             print("作弊课：" + line)
         print(t_build(root))
         print(t_hygiene())
+        print(t_engine_sync())
         print(t_examples(root))
         print("OK")
         return 0

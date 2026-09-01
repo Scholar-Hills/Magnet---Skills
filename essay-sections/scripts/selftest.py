@@ -1290,6 +1290,18 @@ def t_banned_scan(root):
         len(BATCH_SUBSTRINGS), len(BATCH_LITERALS))
 
 
+def t_engine_sync(root):
+    """母仓内共享文件同步闸必须绿；单 Skill 独立安装（没有 tools/）时跳过不报错。"""
+    gate = os.path.join(os.path.dirname(SKILL_DIR), "tools", "check_engine_sync.py")
+    if not os.path.isfile(gate):
+        return "SKIP：tools/check_engine_sync.py 不在（单 Skill 安装），同步闸由母仓负责跑"
+    proc = subprocess.run([PY, gate], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out = (proc.stdout.decode("utf-8", "replace") + proc.stderr.decode("utf-8", "replace"))
+    check(proc.returncode == 0, "共享文件同步闸未过：\n%s" % out)
+    check("banned_words.py" in out, "同步闸输出里应点名 banned_words.py：\n%s" % out)
+    return "共享文件同步闸通过（banned_words.py 六份同字节）"
+
+
 SELFTESTS = (
     t_doctor_init,
     t_import_md_offsets,
@@ -1325,6 +1337,7 @@ SELFTESTS = (
     t_report_cards,
     t_check_examples,
     t_banned_scan,
+    t_engine_sync,
 )
 
 
