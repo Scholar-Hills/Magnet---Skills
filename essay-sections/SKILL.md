@@ -84,6 +84,8 @@ python3 scripts/essayctl.py assemble <slug> --from essays/<slug>/inbox/groups.js
 
 这一篇还没拆过题、正文段又已经有字（也就是刚从已有稿进来）时，`outline add` 自动走 **bind 模式**：**条数必须正好等于正文段数**，按位置绑上去，给多给少都拒收。以后再补角度就是增补模式，每轮 ≤4 条。
 
+不补的代价说清楚：**不补子问题的话正文段的子问题是空的，`answersSubquestion` 就没有比对基准**——那个维度只剩下你凭印象猜「这段大概想说什么」，跟另外两维比会明显虚。
+
 ```json
 {"items": ["房租与生活成本的差价，摊到一年之后还剩多少？", "…（正好 N 条）"]}
 ```
@@ -130,7 +132,7 @@ python3 scripts/essayctl.py review add <slug> <分区> --from essays/<slug>/inbo
 
 **退出 1 就照着报出来的原因改载荷，最多重出一次。** 两次还不过，如实告诉用户「这一段我没评成，卡在哪一条」，不要改闸门、不要挑一个能过的说法糊过去。
 
-**7. 反思（评到 2 分以下或满分时）**
+**7. 反思（评到 2 分及以下或满分时）**
 
 `review add` 打印「这一段评到了 N 分，可以写一条反思」时，问用户要不要写一句——**反思是用户写的，不是你写的**。区域反思只在该段最新评审的综合分 ≤2 或 =5 时才收；总反思随时可写。
 
@@ -153,9 +155,11 @@ python3 scripts/essayctl.py reading add <slug> <分区> --from essays/<slug>/inb
 
 ```
 python3 scripts/essayctl.py version <slug>     # 给当前 sections/ 拍一张快照
-python3 scripts/essayctl.py status <slug>      # 每段一行：字数、哈希、mtime、最新分、走势、过期标记
+python3 scripts/essayctl.py status <slug>      # 每段一个块，见下
 python3 scripts/essayctl.py report <slug>      # 生成 report.html 分段卡
 ```
+
+`status` 先打一段整篇概况（题目、文体 / 级别 / 场景 / 目标字数 / 版本数、主论点、拆题轮数与剩余轮数、反思与荐读条数、未纳入分段条数），然后**每段一个 4–6 行的块**：首行是分区名、字数、哈希前 8 位与 mtime，接下来依次是子问题、最新评审的三维分与综合分（同稿重评会在后面注明）、走势点数与评审条数；这一段在最近一次评审之后动过时多一行 `** 原文已修改`，写过区域反思的多一行反思摘要。末尾再列荐读与 `inbox/` 里没消费掉的载荷。
 
 交付时说清三件事：
 
