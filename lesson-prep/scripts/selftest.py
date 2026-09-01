@@ -236,7 +236,11 @@ def t_positive(root):
     check("<svg" not in deck, "deck.html 里不许有 <svg")
     check(deck.count("data-page-id") == 3, "deck.html 的 data-page-id 应等于成品页数 3，实际 %d"
           % deck.count("data-page-id"))
+    check(deck.count('class="slide"') == 3, 'deck.html 的 class="slide" 应等于成品页数 3，实际 %d'
+          % deck.count('class="slide"'))
     check("src=\"http" not in deck and "src='http" not in deck, "deck.html 不许有外链资源")
+    for doc, tag in ((deck, "deck.html"), (notes, "notes.html")):
+        check("url(http" not in doc and "url(//" not in doc, "%s 不许有 url() 外链" % tag)
     check(notes.count("<script") == 0, "notes.html 里不该有脚本")
     check("教师讲稿 · 不投屏" in notes, "notes.html 页首应写「教师讲稿 · 不投屏」")
     check("@page{size:13.333in 7.5in;margin:0;}" in notes, "notes.html 应带打印 CSS")
@@ -581,6 +585,70 @@ def t_g5(root):
     steps_ok(root, "g5-tag", "phases")
     expect_fail(root, "g5-tag", ("check", "g5-tag", "pages"), "iframe")
 
+    # style 的 url() 外链：走的不是 src=，一样不许出去
+    for i, evil in enumerate(("url(https://cdn.example.invalid/track.png)",
+                              "url('http://example.invalid/a.png')",
+                              "url(//example.invalid/a.png)")):
+        pages = base_pages()
+        pages[0]["html"] = P1_HTML + '<p style="background:%s">底纹</p>' % evil
+        slug = "g5-cssurl-%d" % i
+        make(root, slug, pages=pages)
+        steps_ok(root, slug, "phases")
+        out = expect_fail(root, slug, ("check", slug, "pages"), "url()")
+        check("p1" in out, "%s 的报错应指到页 p1\n%s" % (slug, out))
+
+    # style 的 url() 指到不存在的本地图
+    pages = base_pages()
+    pages[0]["html"] = P1_HTML + '<p style="background:url(assets/none.png)">底纹</p>'
+    make(root, "g5-cssmiss", pages=pages)
+    steps_ok(root, "g5-cssmiss", "phases")
+    expect_fail(root, "g5-cssmiss", ("check", "g5-cssmiss", "pages"), "assets/none.png")
+
+    # style 的 url() 指到 assets/ 里真实存在的文件：放行，且成品里没有外链
+    pages = base_pages()
+    pages[0]["html"] = P1_HTML + '<p style="background:url(assets/bg.png)">底纹</p>'
+    d = make(root, "g5-cssok", pages=pages)
+    write(os.path.join(d, "assets", "bg.png"), "假装这是一张图")
+    steps_ok(root, "g5-cssok")
+    check(run("build", "g5-cssok", cwd=root)[0] == 0, "本地底图应放行并出得了成品")
+    deck = read(os.path.join(d, "deck.html"))
+    check("url(assets/bg.png)" in deck, "本地底图应原样进成品")
+    check("example.invalid" not in deck and "url(http" not in deck and "url(//" not in deck,
+          "成品里不许有 url() 外链")
+
+    # 壳保留的类名：页稿用了就会在成品里多出一页假页
+    pages = base_pages()
+    pages[0]["html"] = P1_HTML + '<div class="slide">冒充一页</div>'
+    make(root, "g5-shellclass", pages=pages)
+    steps_ok(root, "g5-shellclass", "phases")
+    out = expect_fail(root, "g5-shellclass", ("check", "g5-shellclass", "pages"), "保留的类名")
+    check("p1" in out and "slide" in out, "应点名是哪一页用了哪个类名\n%s" % out)
+
+    # 普通类名不误伤
+    pages = base_pages()
+    pages[0]["html"] = P1_HTML + '<div class="tip note">课堂提示</div>'
+    make(root, "g5-okclass", pages=pages)
+    steps_ok(root, "g5-okclass", "phases")
+    res = run("check", "g5-okclass", "pages", cwd=root)
+    check(res[0] == 0, "普通类名不该被壳保留名误伤\n%s" % both(res))
+
+    # 页稿里写 data-page-id：G5 直接拒收并点名页 id，不等到 build 报壳级错误
+    pages = base_pages()
+    pages[0]["html"] = P1_HTML + '<div data-page-id="p9">冒充</div>'
+    make(root, "g5-pageattr", pages=pages)
+    steps_ok(root, "g5-pageattr", "phases")
+    out = expect_fail(root, "g5-pageattr", ("check", "g5-pageattr", "pages"), "data-page-id")
+    check("p1" in out, "应点名是页 p1 写了 data-page-id\n%s" % out)
+    check("G9" not in out, "这该在 G5 拦下，不该拖到 build 变成壳级错误\n%s" % out)
+
+    # 普通 data-* 不误伤
+    pages = base_pages()
+    pages[0]["html"] = P1_HTML + '<div data-step="2">课堂提示</div>'
+    make(root, "g5-okdata", pages=pages)
+    steps_ok(root, "g5-okdata", "phases")
+    res = run("check", "g5-okdata", "pages", cwd=root)
+    check(res[0] == 0, "普通 data-* 不该被误伤\n%s" % both(res))
+
     # 占位模式
     for i, bad in enumerate(("<p>TODO：这里补一段。</p>", "<p>TBD</p>", "<p>placeholder text here</p>",
                              "<p>Lorem ipsum dolor sit amet.</p>", "<p>此处插图</p>",
@@ -646,7 +714,9 @@ def t_g5(root):
     make(root, "g5-drillbad", pages=pages)
     steps_ok(root, "g5-drillbad", "phases")
     expect_fail(root, "g5-drillbad", ("check", "g5-drillbad", "pages"), "drill:")
-    return "G5：5 组消毒绕过 + 外链图 + 缺图文件 + 白名单外标签 + 7 种占位 + 空 figure + 密度双档 + 阶段无页 + covers 悬空 全被判死；drill:<slug> 只查形态"
+    return ("G5：5 组消毒绕过 + 外链图 + 缺图文件 + 白名单外标签 + style 的 url() 三种外链写法 + "
+            "壳保留类名 + 页稿写 data-page-id + 7 种占位 + 空 figure + 密度双档 + 阶段无页 + "
+            "covers 悬空 全被判死；drill:<slug>、本地底图、普通类名与普通 data-* 不误伤")
 
 
 # ---------------------------------------------------------------- G6 讲稿
@@ -961,18 +1031,42 @@ def t_doctor(root):
 # ---------------------------------------------------------------- examples 复核
 
 def t_examples(root):
+    """示例课复核。
+
+    `check --all` 每步都会 write_stamp，直接跑真实目录会把 .stamps/ 写脏工作树，
+    发布闸自测跑一次就多出几个改动文件。所以先整份拷进临时目录再跑，
+    示例课本身一个字节都不动。
+    """
     ex = os.path.join(SKILL_DIR, "examples", "lessons")
     if not os.path.isdir(ex):
         return "examples/lessons/ 尚未落地，示例课复核 SKIP"
     names = sorted(n for n in os.listdir(ex) if os.path.isdir(os.path.join(ex, n)))
     if not names:
         return "examples/lessons/ 是空的，示例课复核 SKIP"
+    sandbox = os.path.join(root, "examples-copy")
     done = []
     for name in names:
-        res = run("check", os.path.join(ex, name), "--all", cwd=root)
+        before = snapshot(os.path.join(ex, name))
+        target = os.path.join(sandbox, name)
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(os.path.join(ex, name), target)
+        res = run("check", target, "--all", cwd=root)
         check(res[0] == 0, "示例课 %s 的 check --all 应 0 ERROR\n%s" % (name, both(res)))
+        check(snapshot(os.path.join(ex, name)) == before,
+              "复核示例课 %s 不许改动 examples/ 下的任何文件" % name)
         done.append(name)
-    return "示例课复核：%s 全部 0 ERROR" % "、".join(done)
+    return "示例课复核（拷到临时目录跑，原目录逐字节不动）：%s 全部 0 ERROR" % "、".join(done)
+
+
+def snapshot(directory):
+    """目录里每个文件的相对路径 → 内容，用来断言「一个字节都没动」。"""
+    out = {}
+    for here, dirs, files in os.walk(directory):
+        dirs[:] = [d for d in sorted(dirs) if d != "__pycache__"]
+        for name in sorted(files):
+            full = os.path.join(here, name)
+            out[os.path.relpath(full, directory)] = read_bytes(full)
+    return out
 
 
 # ---------------------------------------------------------------- 入口

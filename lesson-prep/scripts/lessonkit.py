@@ -97,6 +97,14 @@ BLOCK_TAGS = frozenset((
 ))
 ACCENT_CARRIERS = frozenset(("h1", "h2", "h3", "th", "blockquote"))
 
+# 壳自己的结构名：页稿里再用一次，翻页脚本就会把假页当真页数进去（rail 显示 1/4、
+# 真页内容被藏掉），所以准入阶段直接拒收，让老师在页稿里改名，而不是等 build 报壳级错误。
+SHELL_CLASSES = frozenset((
+    "slide", "pad", "fit", "stage", "rail", "thumb", "talk", "row", "wrap",
+    "say", "no", "hd", "sub",
+))
+SHELL_DATA_ATTRS = frozenset(("data-page-id", "data-talk-id"))
+
 # 白名单外但一定要点名骂的（出现即 ERROR，连 CDATA 都不放过）
 RAW_BAD_TAG = re.compile(
     r"<\s*/?\s*(script|style|iframe|object|embed|svg|math|link|meta|base|form|input|"
@@ -356,10 +364,14 @@ def url_verdict(value):
     return "危险 URL 协议「%s:」" % hit.group(1)
 
 
-def img_src_verdict(src, job):
+def img_src_verdict(src, job, label="img 的 src"):
+    """图片来源判据：只放 assets/ 下真实存在的本地文件与 data:image base64。
+
+    style 里的 url() 走同一套判据——外链一旦从 CSS 溜进成品，投屏时就是一次对外请求。
+    """
     value = (src or "").strip()
     if not value:
-        return "img 的 src 是空的"
+        return "%s 是空的" % label
     if squash_url(value).startswith("data:"):
         if not DATA_IMAGE.match(squash_url(value)):
             return "内嵌图片只许 data:image/(png|jpeg|gif|webp);base64"
@@ -368,7 +380,7 @@ def img_src_verdict(src, job):
             return "内嵌图片超过 %d MB" % (IMG_CAP // (1024 * 1024))
         return None
     if not value.startswith("assets/") or ".." in value or value.startswith("//"):
-        return "img 的 src 只许 assets/ 下的相对路径或 data:image base64，当前是：%s" % value
+        return "%s 只许 assets/ 下的相对路径或 data:image base64，当前是：%s" % (label, value)
     if not os.path.isfile(job.path(value)):
         return "找不到图片文件：%s" % value
     return None
@@ -420,17 +432,31 @@ class _Scan(HTMLParser):
             if key.startswith("on"):
                 self._bad("不许出现 on* 事件属性：%s" % key)
                 continue
+            if key in SHELL_DATA_ATTRS:
+                self._bad("不许出现属性 %s：这是成品壳自己要写的标记，页稿里带上它会把壳的结构算乱"
+                          % key)
+                continue
             if key not in SAFE_ATTRS and not key.startswith("data-") and not key.startswith("aria-"):
                 self._bad("不许出现属性 %s（不在白名单里）" % key)
                 continue
             verdict = url_verdict(value)
             if verdict:
                 self._bad("属性 %s 里出现%s" % (key, verdict))
+            if key == "class":
+                for token in (value or "").split():
+                    if token.lower() in SHELL_CLASSES:
+                        self._bad("class 里不许用壳保留的类名 %s：成品壳的样式与翻页脚本按它认页，"
+                                  "页稿用了就会多出一页假页，换个名字" % token)
             if key == "style":
                 for inner in re.findall(r"url\(([^)]*)\)", value or "", re.IGNORECASE):
-                    deeper = url_verdict(inner.strip().strip("\"'"))
+                    one = inner.strip().strip("\"'")
+                    deeper = url_verdict(one)
                     if deeper:
                         self._bad("style 的 url() 里出现%s" % deeper)
+                        continue
+                    deeper = img_src_verdict(one, self.job, label="style 的 url()")
+                    if deeper:
+                        self._bad(deeper)
                 if re.search(r"expression\s*\(", value or "", re.IGNORECASE):
                     self._bad("style 里不许出现 expression()")
                 self.hexes.extend(HEX6.findall(value or ""))
@@ -704,12 +730,21 @@ def verify_shell(deck, notes, ready_count, rep):
     if deck.count("data-page-id") != ready_count:
         rep.bad("G9", "deck.html", "data-page-id 数 %d 与成品页数 %d 对不上"
                 % (deck.count("data-page-id"), ready_count))
-    if 'src="http' in deck or "src='http" in deck or 'src="//' in deck:
-        rep.bad("G9", "deck.html", "成品里不许有外链资源")
+    # 翻页脚本按 .slide 认页：多一个假页，rail 的页码与翻页顺序就全错
+    if deck.count('class="slide"') != ready_count:
+        rep.bad("G9", "deck.html", 'class="slide" 出现 %d 次，与成品页数 %d 对不上：'
+                                   "有页稿把壳的结构名带进来了"
+                % (deck.count('class="slide"'), ready_count))
     if PAGE_RULE not in notes:
         rep.bad("G9", "notes.html", "讲稿页缺打印 CSS")
     if "<script" in notes:
         rep.bad("G9", "notes.html", "讲稿页里不许有脚本")
+    # 外链既可能走 src=，也可能藏在 style 的 url() 里——两条都堵，deck 与 notes 都查
+    for name, doc in (("deck.html", deck), ("notes.html", notes)):
+        if 'src="http' in doc or "src='http" in doc or 'src="//' in doc:
+            rep.bad("G9", name, "成品里不许有外链资源：src 指向了站外")
+        if re.search(r"url\(\s*['\"]?\s*(?:https?:)?//", doc, re.IGNORECASE):
+            rep.bad("G9", name, "成品里不许有外链资源：style 的 url() 指向了站外")
 
 
 # ---------------------------------------------------------------- 工作区
