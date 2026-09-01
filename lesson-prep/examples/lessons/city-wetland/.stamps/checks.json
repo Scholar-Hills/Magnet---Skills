@@ -1,0 +1,35 @@
+{
+  "at": "2026-09-01T11:21:38",
+  "slug": "city-wetland",
+  "route": "homework-first",
+  "steps": {
+    "lesson": "ok",
+    "questions": "ok",
+    "phases": "ok",
+    "pages": "ok"
+  },
+  "locks": [
+    {
+      "name": "没出作业，不许规划阶段",
+      "state": "open",
+      "lockReason": ""
+    },
+    {
+      "name": "没规划阶段，不许写页稿",
+      "state": "open",
+      "lockReason": ""
+    },
+    {
+      "name": "没有一页过验收，不许出成品",
+      "state": "open",
+      "lockReason": ""
+    }
+  ],
+  "deck": {
+    "state": "ok",
+    "reason": "成品与页稿一致，盖章时间 2026-09-01T11:21:38",
+    "palette": "cyan",
+    "failedPages": []
+  },
+  "items": []
+}

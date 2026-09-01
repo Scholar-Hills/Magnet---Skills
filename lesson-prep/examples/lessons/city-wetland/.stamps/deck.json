@@ -1,0 +1,43 @@
+{
+  "step": "deck",
+  "at": "2026-09-01T11:21:38",
+  "hashes": {
+    "lesson.json": "3e0f21af40d7fbe424395dedcf5c3fd197310eb334fe778ce813ea92eea97785",
+    "questions.json": "b8c5f6a980fb309963eaeb9fe7e01a6270505fda2ff13c628bf3d2033c537902",
+    "phases.json": "e720bb9a71ec7e011f4ac712568ab95eab863e0597103b5fb57422138d698dcb",
+    "pages/index.json": "9ea30dadaa370579abe42af282ef45b9959d1ff194f0da409e493e2c79d45400",
+    "pages/p01.html": "22b9164f9a533d8d3f8fc15c206ff3956ca13fc2d0fa5d2deb08972a0ce8edf5",
+    "pages/p01.notes.md": "08d28d020914e4ac871ecb7d10845c5915f7d6333f05550d39e9554876d2e4a0",
+    "pages/p02.html": "97134a29fc23643cae4b2bdeb5fdd447d1afb65d4d27a067916e7e4001e6f38b",
+    "pages/p02.notes.md": "316cab213847089387b59353044562a78bad6749359383f4d68ce5728c16f3d7",
+    "pages/p03.html": "8e8916ba22380a4acb4358fe9258ed372edfe3410e14f9f5760800e889f5f27e",
+    "pages/p03.notes.md": "5227d3f28bd3e01d460a0a0ef8d79f6c543d2cc172db8def38d88a3fc8565f9d",
+    "pages/p04.html": "e6231924758bbf5ca0456e012b85b2bda5d838e1dc7401bf9af3899fd7703dff",
+    "pages/p04.notes.md": "b35d65aaaca2aa2ed7ec924efc49153a658c18ee25f628f7a43df4874dcf2d61",
+    "pages/p05.html": "9cc218f2074dba23ae77cf8baa4a25bacda3c9cac4e2e2a0696e9ebeee5142ac",
+    "pages/p05.notes.md": "24ddf0dec24a8fa68ade39905d6279ce29ab59fb19235c266e9adbfcd31e25b9",
+    "pages/p06.html": "b0afbb05cb51a0a5d2475da47ab73b9c4b4ecbcf010660dfe65a49accb6006e9",
+    "pages/p06.notes.md": "5ad033e69355b428fbbd0ba2ac9190035b57c4f7802637364bbab0ffa0465093",
+    "pages/p07.html": "fb65e1d84ffc0d0e18b86bb320d363b71efcdcdf3e7fd8a95e55f592d638ec99",
+    "pages/p07.notes.md": "d73965f383b3f928f2cccc8f69a90b02540e20f6a713487a532eb68bb928c25d",
+    "pages/p08.html": "b081f93e10d1dbfcf6fbb8dfa08ad05f1d3faf1fad740469c7e297119f340070",
+    "pages/p08.notes.md": "53a189583800d0f517d68d524425e5c150b1a0cca8299b9325c4dece4dcb1ce1",
+    "pages/p09.html": "9767eaced52943ba2658f78ef88a336503dd7e6b84b39be916eb1adbc830d407",
+    "pages/p09.notes.md": "7ce9206166df451918c451d5a743c91fb368df51e9a2d6d4230c27446ac82ae0",
+    "deck.html": "8acccef1f1600cd744059bda3bd36bb8641b6467b52ef2ea649e89d12b106bc2",
+    "notes.html": "d7712fcd36f6793091c8d9baa2d73628f4b528fb6b2b6d0eabbd05a788dea33e"
+  },
+  "palette": "cyan",
+  "failedPages": [],
+  "readyPages": [
+    "p01",
+    "p02",
+    "p03",
+    "p04",
+    "p05",
+    "p06",
+    "p07",
+    "p08",
+    "p09"
+  ]
+}
