@@ -113,6 +113,8 @@ RAW_BAD_TAG = re.compile(
 RAW_ON_ATTR = re.compile(r"""[\s/"']on[a-zA-Z]+\s*=""")
 DANGER_SCHEME = re.compile(r"^(javascript|vbscript|data):")
 DATA_IMAGE = re.compile(r"^data:image/(png|jpeg|jpg|gif|webp);base64,", re.IGNORECASE)
+# 合法 data:image 的 base64 载荷：外链判据先把它抠掉，免得载荷里的「//」被误判成外链
+DATA_IMAGE_PAYLOAD = re.compile(r"data:image/(?:png|jpeg|jpg|gif|webp);base64,[a-z0-9+/=]*")
 HEX6 = re.compile(r"#[0-9a-fA-F]{6}\b")
 
 PLACEHOLDER_ASCII = (
@@ -364,6 +366,21 @@ def url_verdict(value):
     return "危险 URL 协议「%s:」" % hit.group(1)
 
 
+def external_url_verdict(value):
+    """None 表示没有外链字样，否则给一句中文说明。
+
+    判据故意不按写法枚举：`url()`、`image-set()`、`cross-fade()`、`-webkit-image-set()`、
+    `image()` 换个函数名就能绕开枚举，所以只认协议字样本身——属性值压掉空白、统一小写、
+    抠掉合法 data:image 的 base64 载荷之后，出现 `http:`、`https:` 或 `//`（协议相对，
+    `http://` 与 `https://` 也都含它）即判外链。CSS 注释里的网址一样算：属性里没有
+    写网址的正当理由，网址请写进正文文字。准入（G5）与成品复查（G9）用的是同一条。
+    """
+    flat = DATA_IMAGE_PAYLOAD.sub("data:image", squash_url(value))
+    if "//" in flat or re.search(r"https?:", flat):
+        return "外链字样（http://、https:// 或协议相对 //）"
+    return None
+
+
 def img_src_verdict(src, job, label="img 的 src"):
     """图片来源判据：只放 assets/ 下真实存在的本地文件与 data:image base64。
 
@@ -442,6 +459,10 @@ class _Scan(HTMLParser):
             verdict = url_verdict(value)
             if verdict:
                 self._bad("属性 %s 里出现%s" % (key, verdict))
+            # 外链判据按协议字样判，不按 url()/image-set() 这类写法枚举（见 external_url_verdict）
+            verdict = external_url_verdict(value)
+            if verdict:
+                self._bad("属性 %s 里出现%s" % (key, verdict))
             if key == "class":
                 for token in (value or "").split():
                     if token.lower() in SHELL_CLASSES:
@@ -501,6 +522,19 @@ def scan_page_html(job, where, source, rep):
     if hit:
         rep.bad("G5", where, "正文里出现占位模式「%s」" % hit)
     return scan.carriers, scan.hexes
+
+
+class _ExternalScan(HTMLParser):
+    """成品侧外链复查：只看属性值，判据与页稿准入的 external_url_verdict 是同一条。"""
+
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=True)
+        self.hits = []
+
+    def handle_starttag(self, tag, attrs):
+        for key, value in attrs:
+            if external_url_verdict(value):
+                self.hits.append((tag.lower(), (key or "").lower()))
 
 
 EMPTY_TAGS = frozenset(("img", "br", "hr", "col"))
@@ -739,12 +773,19 @@ def verify_shell(deck, notes, ready_count, rep):
         rep.bad("G9", "notes.html", "讲稿页缺打印 CSS")
     if "<script" in notes:
         rep.bad("G9", "notes.html", "讲稿页里不许有脚本")
-    # 外链既可能走 src=，也可能藏在 style 的 url() 里——两条都堵，deck 与 notes 都查
+    # 外链复查与页稿准入是同一条判据：属性值里出现协议字样（http://、https://、
+    # 协议相对 //）即报，不按 src= 或 url( 的写法枚举——image-set()/cross-fade()
+    # 换个函数名也一样抓；合法的 data:image 内嵌图不受影响。deck 与 notes 都查。
     for name, doc in (("deck.html", deck), ("notes.html", notes)):
-        if 'src="http' in doc or "src='http" in doc or 'src="//' in doc:
-            rep.bad("G9", name, "成品里不许有外链资源：src 指向了站外")
-        if re.search(r"url\(\s*['\"]?\s*(?:https?:)?//", doc, re.IGNORECASE):
-            rep.bad("G9", name, "成品里不许有外链资源：style 的 url() 指向了站外")
+        scan = _ExternalScan()
+        try:
+            scan.feed(doc)
+            scan.close()
+        except Exception as e:
+            rep.bad("G9", name, "成品 HTML 解析失败：%s" % e)
+        for tag, key in scan.hits:
+            rep.bad("G9", name, "成品里不许有外链资源：<%s> 的 %s 属性里出现外链字样"
+                                "（http://、https:// 或协议相对 //）" % (tag, key))
 
 
 # ---------------------------------------------------------------- 工作区

@@ -59,7 +59,7 @@
 
 ### 1.6 自包含
 
-- 无外链：`src="http…"`、`src="//…"`、`url(//…)` 在 `deck.html` 与 `notes.html` 里都是 ERROR。教室断网也照常放。
+- 无外链：`deck.html` 与 `notes.html` 里任何属性值出现 `http://`、`https://` 或协议相对 `//`（合法的 `data:image` 内嵌图除外）都是 ERROR——判据与页稿准入是同一条、不按 `src=` / `url(` 的写法枚举，见 §2.7。教室断网也照常放。
 - 无品牌、无 logo、无页眉。这是一个空壳，上面只有老师的内容。
 - 字体走系统字体栈（`-apple-system` / `Segoe UI` / `PingFang SC` / `Microsoft YaHei` 一路兜底），不下载任何字体文件。
 
@@ -106,11 +106,11 @@
 
 好在这类页在准入阶段就已经判死了（`section` 不在白名单里），根本到不了 `build`。**所以：不要指望消毒替你收拾页稿，标签该配平就配平。**
 
-### 2.7 已知的外链漏洞：`image-set()`
+### 2.7 外链判据从严：属性值里出现协议字样就拒，注释也不例外
 
-**`style` 属性里写成 `image-set('https://…' 1x)` 的外链，当前拦不住**，会一路进到 `deck.html`。准入只按 `url(…)` 抓 CSS 里的资源引用，成品侧的外链检查也一样。
+页稿准入与成品复查用同一条外链判据：属性值压掉空白、统一小写、抠掉合法 `data:image` 的 base64 载荷之后，出现 `http:`、`https:` 或协议相对 `//` 即 ERROR。**不按函数名枚举**——`url()`、`image-set()`、`cross-fade()`、`-webkit-image-set()`、`image()` 一视同仁。
 
-在补上之前：**页稿里不要在 `style` 属性里写任何形式的图片引用，图片一律走 `<img src="assets/…">`。** 详见 `references/workflow-rules.md` §5。
+代价是从严误伤：CSS 注释里写个网址（`style="/* 见 https://… */color:red"`）同样被拒。这是刻意的——属性里没有写网址的正当理由，网址请写进正文文字。详见 `references/workflow-rules.md` §5。
 
 ## 3. 怎么写页稿才用得上这套壳
 

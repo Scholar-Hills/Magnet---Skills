@@ -99,6 +99,7 @@
 | 属性值经归一后以 `javascript:` / `vbscript:` / `data:` 开头 | ERROR（`data:image/…;base64,` 例外） |
 | `class` 里出现壳保留类名 | ERROR，见 §6 |
 | 出现 `data-page-id` / `data-talk-id` | ERROR，见 §6 |
+| 任何属性值里出现外链协议字样（`http://` / `https://` / 协议相对 `//`） | ERROR，判据见 §5（合法 `data:image` 载荷除外） |
 | `style` 里的 `url()` | 按危险 URL + 图片来源双重判据，见 §5 |
 | `style` 里出现 `expression(` | ERROR |
 | `img` 缺 `src`，或 `src` 不合格 | ERROR，见 §5 |
@@ -122,14 +123,17 @@
 | `src="https://…"`、`src="//…"`、`src="../x.png"` | ERROR |
 | `style="background:url(assets/x.png)"` | 与 `img` 的 `src` 走**同一套判据** |
 | `style="background:url(https://…)"` | ERROR |
+| `style="background:image-set('https://…' 1x)"` | ERROR（协议字样判据，与函数名无关） |
 
-外链一旦从 CSS 溜进成品，投屏时就是一次对外请求：教室网络不通就是一块白，更别说它把上课这件事泄露给了第三方。所以 `url()` 与 `src` 同判。`build` 之后还会再查一遍成品：`src="http`、`src="//`、`url(//` 一律 ERROR。
+外链一旦从 CSS 溜进成品，投屏时就是一次对外请求：教室网络不通就是一块白，更别说它把上课这件事泄露给了第三方。所以 `url()` 与 `src` 同判。
 
-### 已知边界（当前拦不住，如实写在这里）
+### 外链判据：协议字样出现即拒，不按写法枚举
 
-**`image-set()` 这类不带 `url(` 的 CSS 语法，当前拦不住外链。** 准入只按 `url(…)` 抓 CSS 里的资源引用，写成 `style="background:image-set('https://…' 1x)"` 时既不匹配 `url(`，也不会被成品侧的外链检查捕获，会一路进到 `deck.html`。
+`url()`、`image-set()`、`cross-fade()`、`-webkit-image-set()`、`image()` 换个函数名就能绕开枚举，所以外链判据不认写法、只认协议字样本身：**任何属性值（`style` 在内）先压掉空白与控制字符、统一小写、抠掉合法 `data:image` 的 base64 载荷，剩下的内容里出现 `http:`、`https:` 或 `//`（协议相对，`http://` 与 `https://` 也都含它）就是 ERROR。**
 
-这不是设计取舍，是没补上的洞。在补上之前：**页稿里不要在 `style` 属性里写任何形式的图片引用，图片一律走 `<img src="assets/…">`。** 老师收到页稿时，若看见 `style` 里带 `image-set`、`cross-fade` 这类函数，请当作外链处理，手工删掉。
+这条判据刻意从严：CSS 注释里写个网址（`style="/* 见 https://… */color:red"`）同样被拒。属性里没有写网址的正当理由，网址请写进正文文字。合法的 `data:image` 内嵌图不受影响——判定之前它的 base64 载荷已经被抠掉，载荷里恰好出现的 `//` 不会误报。
+
+`build` 之后还会用**同一条判据**把 `deck.html` 与 `notes.html` 的全部属性值再查一遍（G9）。
 
 ## 6. 壳保留词：这 13 个类名会被拒收
 

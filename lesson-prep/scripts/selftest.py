@@ -616,6 +616,41 @@ def t_g5(root):
     check("example.invalid" not in deck and "url(http" not in deck and "url(//" not in deck,
           "成品里不许有 url() 外链")
 
+    # 外链判据不按函数名枚举（终审收窄：协议字样出现即判）：image-set / cross-fade /
+    # -webkit-image-set / image() 乃至 CSS 注释里的网址，一律拒收
+    for i, evil in enumerate(("image-set('https://cdn.example.invalid/a.png' 1x)",
+                              "-webkit-image-set(url('https://cdn.example.invalid/a.png') 1x)",
+                              "image('//example.invalid/x.png')",
+                              "cross-fade('https://a.example.invalid/a.png',"
+                              "'https://b.example.invalid/b.png')",
+                              "red;/* 参考 https://example.invalid/doc */")):
+        pages = base_pages()
+        pages[0]["html"] = P1_HTML + '<p style="background:%s">底纹</p>' % evil
+        slug = "g5-cssproto-%d" % i
+        make(root, slug, pages=pages)
+        steps_ok(root, slug, "phases")
+        out = expect_fail(root, slug, ("check", slug, "pages"), "外链字样")
+        check("p1" in out, "%s 的报错应指到页 p1\n%s" % (slug, out))
+
+    # data:image 载荷里的 // 不算外链：判据先抠掉合法载荷再查，不误伤内嵌图
+    pages = base_pages()
+    pages[0]["html"] = (P1_HTML +
+                        '<p style="background:url(data:image/png;base64,aa//bb+cc==)">底纹</p>')
+    make(root, "g5-dataok", pages=pages)
+    steps_ok(root, "g5-dataok", "phases")
+    res = run("check", "g5-dataok", "pages", cwd=root)
+    check(res[0] == 0, "data:image 载荷里的 // 不该被外链判据误伤\n%s" % both(res))
+
+    # 成品侧同一条判据：verify_shell 自己也要抓 image-set 外链，不依赖准入闸兜底
+    sys.path.insert(0, HERE)
+    import lessonkit                                             # noqa: E402
+    shell_rep = lessonkit.Rep()
+    lessonkit.verify_shell(
+        "<div style=\"background:image-set('https://evil.invalid/x.png' 1x)\"></div>",
+        "", 0, shell_rep)
+    check(any("外链字样" in e["reason"] for e in shell_rep.errors()),
+          "verify_shell 应按协议字样抓成品里的 image-set 外链")
+
     # 壳保留的类名：页稿用了就会在成品里多出一页假页
     pages = base_pages()
     pages[0]["html"] = P1_HTML + '<div class="slide">冒充一页</div>'
@@ -715,8 +750,9 @@ def t_g5(root):
     steps_ok(root, "g5-drillbad", "phases")
     expect_fail(root, "g5-drillbad", ("check", "g5-drillbad", "pages"), "drill:")
     return ("G5：5 组消毒绕过 + 外链图 + 缺图文件 + 白名单外标签 + style 的 url() 三种外链写法 + "
+            "image-set 家族与注释网址 5 种协议字样（成品侧 verify_shell 同判据） + "
             "壳保留类名 + 页稿写 data-page-id + 7 种占位 + 空 figure + 密度双档 + 阶段无页 + "
-            "covers 悬空 全被判死；drill:<slug>、本地底图、普通类名与普通 data-* 不误伤")
+            "covers 悬空 全被判死；drill:<slug>、本地底图、data:image 载荷、普通类名与普通 data-* 不误伤")
 
 
 # ---------------------------------------------------------------- G6 讲稿
