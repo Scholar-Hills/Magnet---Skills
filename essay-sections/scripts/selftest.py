@@ -893,14 +893,15 @@ def t_chain_rebuild_index(root):
     out = ok(root, "check", SLUG, "--rebuild-index")
     check("0 个 ERROR" in out, "重建之后应 0 ERROR：\n%s" % out)
 
-    # C. 链自身断了的时候，--rebuild-index 必须拒绝重建，不许把篡改盖过去
+    # C. 链自身断了的时候，--rebuild-index 必须拒绝重建，不许把篡改盖过去。
+    #    索引这一侧摆成「落后但锚得住」，好让走到的确实是「链断」这条拒绝分支。
     kept = [ln for ln in read(path).split("\n") if ln.strip()]
     hacked = kept[0].replace('"language":4', '"language":5', 1)
     check(hacked != kept[0], "用例本身要能改到第一行的分值：%s" % kept[0][:120])
     kept[0] = hacked
     write(path, "\n".join(kept) + "\n")
     tips = load(chains_path)
-    tips["ledger/body-01.jsonl"] = {"seq": 1, "hash": "0" * 64}   # 索引同时也落后了
+    tips["ledger/body-01.jsonl"] = {"seq": 1, "hash": sha256_hex(kept[0])}
     write_json(chains_path, tips)
     frozen = read(chains_path)
     rc, out, err = run(root, "check", SLUG, "--rebuild-index")
@@ -908,6 +909,59 @@ def t_chain_rebuild_index(root):
           "链自身断了时 --rebuild-index 必须拒绝重建，rc=%d\n%s%s" % (rc, out, err))
     check(read(chains_path) == frozen, "被拒绝的重建不许改动 chains.json 字节")
     return "索引丢失 / 落后一条都能 --rebuild-index 修好；链自身断了时拒绝重建且不动索引"
+
+
+def t_rebuild_never_launders_deletion(root):
+    """删行不许被 --rebuild-index 洗白，check 也不许主动指路。
+
+    脚本是先追加行、再写索引，所以打断只做得出「索引落后」。索引比账本长、或者账本
+    空了索引还记着行，这两种打断做不出来 —— 只可能是行没了。这种时候重建就是替人
+    把一条评审抹掉，所以必须拒绝，而且提示里一个字都不许提 --rebuild-index。
+    """
+    ws = built(root)
+    for i in (1, 2, 3):
+        seg = os.path.join(ws, "sections", "body-06.md")
+        if i > 1:
+            write(seg, read(seg) + "\n\n第 %d 次改稿补的一句话。\n" % i)
+        add_review_ok(root, ws, "body-06", note="第 %d 次评审，这一步还要再说白一点。" % i)
+    ok(root, "check", SLUG)
+    path = os.path.join(ws, "ledger", "body-06.jsonl")
+    chains_path = os.path.join(ws, "chains.json")
+    good = read(path)
+    kept = [ln for ln in good.split("\n") if ln.strip()]
+    check(len(kept) == 3, "先攒够 3 行账本，实际 %d 行" % len(kept))
+
+    def refuses(label, content):
+        write(path, content)
+        frozen = read(chains_path)
+        rc, out, err = run(root, "check", SLUG)
+        check(rc == 1, "%s 必须 ERROR，rc=%d\n%s%s" % (label, rc, out, err))
+        check("--rebuild-index" not in out,
+              "%s 时 check 不许主动指路 --rebuild-index：\n%s" % (label, out))
+        rc, out, err = run(root, "check", SLUG, "--rebuild-index")
+        check(rc == 1, "%s 时 --rebuild-index 必须照样 ERROR，rc=%d\n%s%s"
+              % (label, rc, out, err))
+        check("已按各条链的实际内容重建" not in out,
+              "%s 时不许真的重建索引：\n%s" % (label, out))
+        check(read(chains_path) == frozen, "%s 时 chains.json 一个字节都不许动" % label)
+        # 再跑一次，确认没有被「洗成永久 0 ERROR」
+        rc, out, err = run(root, "check", SLUG)
+        check(rc == 1, "%s 之后 check 必须一直红，rc=%d\n%s" % (label, rc, out))
+
+    refuses("删掉末行", "\n".join(kept[:-1]) + "\n")
+    refuses("删掉最后两行", kept[0] + "\n")
+    refuses("整条账本清空", "")
+    refuses("整条账本只剩空白", "\n\n")
+
+    os.remove(path)
+    frozen = read(chains_path)
+    rc, out, err = run(root, "check", SLUG, "--rebuild-index")
+    check(rc == 1, "账本文件被删掉时 --rebuild-index 必须照样 ERROR，rc=%d\n%s%s" % (rc, out, err))
+    check(read(chains_path) == frozen, "账本文件被删掉时 chains.json 也不许动")
+
+    write(path, good)
+    ok(root, "check", SLUG)
+    return "删末行 / 删两行 / 清空 / 删文件：--rebuild-index 一律拒绝、不动索引、不指路，还原后复绿"
 
 
 def t_reflect_trigger(root):
@@ -1251,6 +1305,7 @@ SELFTESTS = (
     t_chain_tamper,
     t_chain_index_known_limit,
     t_chain_rebuild_index,
+    t_rebuild_never_launders_deletion,
     t_reflect_trigger,
     t_reflect_pack,
     t_segment_changed,

@@ -1618,12 +1618,16 @@ def cmd_export(args):
 
 # ---------------------------------------------------------------- check
 
-def check_chain(ws, rel, bad, index_bad):
-    """复核一条链。
+def check_chain(ws, rel, bad, stale_bad, gone_bad):
+    """复核一条链，三类问题分开报。
 
-    两类问题分开报：`bad` 是链自身的毛病（行被改、断链、seq 跳号），只能人去查；
-    `index_bad` 是链尾索引 chains.json 跟不上，可能只是脚本写到一半被打断，
-    在链自身自洽的前提下 `check --rebuild-index` 能修。
+    - `bad`：链自身的毛病（行被改、断链、seq 跳号），只能人去查。
+    - `stale_bad`：索引**落后**——索引停在某一行、账本比它长，或者索引整条缺失。
+      `append_row` 是先追加行、再写索引，所以写盘被打断只可能落到这一格；链自身自洽时
+      `check --rebuild-index` 能修。
+    - `gone_bad`：索引**超前**（记着第 N 行、账本里根本没有那一行），或者账本空了索引
+      还记着行。这两种打断做不出来，只可能是行没了。**不许重建**，也不给重建的提示——
+      重建等于把丢掉的评审洗白。
     """
     lines = ws.raw_lines(rel)
     tips = ws.chains().get(rel)
@@ -1645,12 +1649,22 @@ def check_chain(ws, rel, bad, index_bad):
         prev = sha256_text(line)
     if lines:
         if not tips:
-            index_bad.append("ERROR %s 没有链尾索引，chains.json 对不上。" % rel)
-        elif tips.get("seq") != len(lines) or tips.get("hash") != sha256_text(lines[-1]):
-            index_bad.append("ERROR %s 的链尾对不上索引：有人删了末行或手动追加过，"
-                             "也可能是脚本写到一半被打断。" % rel)
+            stale_bad.append("ERROR %s 在 %s 里没有链尾索引。" % (rel, CHAINS_NAME))
+        else:
+            seq = tips.get("seq")
+            # 索引指着的那一行必须真的在账本里、且逐字节对得上；否则就是行没了或末行被改
+            anchored = (is_int(seq, 1, len(lines))
+                        and tips.get("hash") == sha256_text(lines[seq - 1]))
+            if not anchored:
+                gone_bad.append("ERROR %s 的链尾索引记着第 %r 行，账本里没有对得上的那一行"
+                                "（现在共 %d 行）：有行被删掉了，或者末行被改过。"
+                                % (rel, seq, len(lines)))
+            elif seq < len(lines):
+                stale_bad.append("ERROR %s 的链尾索引停在第 %d 行，账本已经有 %d 行。"
+                                 % (rel, seq, len(lines)))
     elif tips:
-        index_bad.append("ERROR %s 空了，但 chains.json 里还记着 %d 行。" % (rel, tips.get("seq")))
+        gone_bad.append("ERROR %s 一行都没有了，但 %s 里还记着 %r 行：整条账本被删空了。"
+                        % (rel, CHAINS_NAME, tips.get("seq")))
     return [json.loads(ln) for ln in lines]
 
 
@@ -1688,9 +1702,9 @@ def cmd_check(args):
             if at != len(raw) or rebuilt != raw:
                 bad.append("ERROR 保真校验没过：按偏移拼回来的字节与 source.txt 不一致。")
 
-    chain_bad, index_bad = [], []
-    check_chain(ws, OUTLINE_NAME, chain_bad, index_bad)
-    reflections = check_chain(ws, REFLECT_NAME, chain_bad, index_bad)
+    chain_bad, stale_bad, gone_bad = [], [], []
+    check_chain(ws, OUTLINE_NAME, chain_bad, stale_bad, gone_bad)
+    reflections = check_chain(ws, REFLECT_NAME, chain_bad, stale_bad, gone_bad)
     current = {}
     for name in names:
         path = ws.section_path(name)
@@ -1699,7 +1713,7 @@ def cmd_check(args):
     seen_notes = {}
     for name in names:
         rel = ws.ledger_rel(name)
-        for row in check_chain(ws, rel, chain_bad, index_bad):
+        for row in check_chain(ws, rel, chain_bad, stale_bad, gone_bad):
             if row.get("stage") != "review":
                 continue
             seq = row.get("seq")
@@ -1770,23 +1784,32 @@ def cmd_check(args):
             bad.append("ERROR inbox/ 里还剩 %d 份载荷没被脚本消费：%s"
                        % (len(left), "、".join(left)))
 
-    # 链尾索引落后或缺失：链自身自洽时可以重建，链自身断了就不许拿重建盖过去
+    # 链尾索引对不上账本。只有「索引落后」这一格能重建：append_row 先落行、后写索引，
+    # 打断只做得出这一种。索引超前、账本被删空都是行没了，重建等于把丢掉的评审洗白。
     hints = []
-    if index_bad:
+    if stale_bad or gone_bad:
         want = getattr(args, "rebuild_index", False)
-        if want and not chain_bad:
+        if want and stale_bad and not gone_bad and not chain_bad:
             tips = ws.rebuild_chains()
             hints.append("已按各条链的实际内容重建 %s（%d 条链）。" % (CHAINS_NAME, len(tips)))
             hints.append("注意：重建信的是账本文件本身，它只修「索引落后」，"
                          "不能替你证明没人往账本里加过行。")
-            index_bad = []
+            stale_bad = []
         else:
-            bad.extend(index_bad)
-            if chain_bad and want:
+            bad.extend(gone_bad)
+            bad.extend(stale_bad)
+            if gone_bad:
+                # 这里一个字都不许提重建：工具主动指路会把「删掉一条评审」变成一步消音
+                hints.append("索引比账本长（或者账本空了索引还记着行）——脚本是先落行、"
+                             "再写索引，打断只会让索引落后，做不出这种状态。")
+                hints.append("只可能是账本的行没了。请自己把行找回来（版本快照、备份、"
+                             "版本管理里都可能有），不要靠改索引把它抹平。")
+            elif chain_bad and want:
                 hints.append("--rebuild-index 拒绝动手：链自身就是断的，重建只会把篡改盖过去。"
                              "先照上面的行号把账本查清楚。")
             elif not chain_bad:
-                hints.append("每条链自身逐行复算都是自洽的，对不上的只有索引 %s。" % CHAINS_NAME)
+                hints.append("每条链自身逐行复算都是自洽的，对不上的只有索引 %s，"
+                             "而且索引是落后的那一侧。" % CHAINS_NAME)
                 hints.append("如果确认没有人动过账本（比如上一次写盘被打断），可以跑："
                              "check %s --rebuild-index" % ws.slug)
     bad.extend(chain_bad)
@@ -1872,7 +1895,8 @@ def build_parser():
     k = sub.add_parser("check", help="离线复核整个工作区")
     k.add_argument("slug", help="稿名或工作区目录")
     k.add_argument("--rebuild-index", dest="rebuild_index", action="store_true",
-                   help="链自身自洽、只是链尾索引落后或缺失时，按账本实际内容重建 %s"
+                   help="链自身自洽、且链尾索引只是落后或缺失时，按账本实际内容重建 %s；"
+                        "索引超前或账本被删空一律拒绝（那是行没了，不是写盘被打断）"
                         % CHAINS_NAME)
     return p
 
