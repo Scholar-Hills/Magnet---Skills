@@ -26,7 +26,7 @@ allowed-tools: Bash, Read, Write, Edit
 ## 前置检查（不可跳过）
 
 0. **定位脚本。** 本 Skill 的脚本在 Skill 目录下，不在老师的工作区。按顺序找 `lesson-prep/scripts/lessonkit.py`，取第一个存在的绝对路径记作 `KIT`：
-   ① 这份 SKILL.md 所在目录下的 `scripts/lessonkit.py`（你就是从那个目录读到本文件的）；② Claude Code：`~/.claude/skills/lesson-prep/`、当前项目 `.claude/skills/lesson-prep/`；③ WorkBuddy / CodeBuddy：`~/.workbuddy-ai/skills/lesson-prep/`、`~/.workbuddy/skills/lesson-prep/`、`~/.codebuddy/skills/lesson-prep/`、当前项目 `.codebuddy/skills/lesson-prep/`；④ OpenClaw：`~/.openclaw/workspace/skills/lesson-prep/`；⑤ 小红书 `redskill install` 的默认位置：当前目录 `./skills/lesson-prep/`；⑥ 老师在对话里指定的目录；⑦ 都没有就搜一次：`find . ~/.claude ~/.workbuddy ~/.workbuddy-ai ~/.codebuddy ~/.openclaw -path '*lesson-prep/scripts/lessonkit.py' 2>/dev/null | head -1`。
+   ① 这份 SKILL.md 所在目录下的 `scripts/lessonkit.py`（你就是从那个目录读到本文件的）；② Claude Code：`~/.claude/skills/lesson-prep/`、当前项目 `.claude/skills/lesson-prep/`；③ WorkBuddy / CodeBuddy：`~/.workbuddy-ai/skills/lesson-prep/`、`~/.workbuddy/skills/lesson-prep/`、`~/.codebuddy/skills/lesson-prep/`、当前项目 `.codebuddy/skills/lesson-prep/`；④ OpenClaw：`~/.openclaw/workspace/skills/lesson-prep/`；⑤ 小红书 `redskill install` 的默认位置：当前目录 `./skills/lesson-prep/`；⑥ 老师在对话里指定的目录；⑦ 都没有就搜一次：`find . ~/.claude ~/.workbuddy-ai ~/.workbuddy ~/.codebuddy ~/.openclaw -path '*lesson-prep/scripts/lessonkit.py' 2>/dev/null | head -1`。
    本文后面所有 `python3 scripts/lessonkit.py …` 都读作 `python3 "$KIT" …`，并且始终在老师的工作区（`lessons/` 的父目录）下执行：`cd <工作区> && python3 "$KIT" check lessons/<slug> pages`。
    **七处都找不到就立即停止**，告诉老师「这份 Skill 的备课脚本缺失，请重新下载完整目录」。**任何情况下都不要自己写一个替代脚本**——手写的校验器没有这里的三把锁与覆盖判据，会让老师以为这节课是核过的。
 1. 运行 `python3 "$KIT" doctor`。`python3` 不存在就试 `python`（Windows 常见）；两个都没有，告诉老师先装 Python 3.8+，不要继续。
@@ -141,7 +141,7 @@ python3 "$KIT" check <slug> --all        # 四步复核 + 成品哈希对账，0
 
 锁**由盖章文件保证，不靠自觉**。撞上锁时脚本打印「锁住了：<该先跑哪一条>」并**退出 2**，连闸门都不跑。**这不是环境坏了，是流程还没走到——照它说的那一条去跑，不要绕。**
 
-`--route content-first` 是给「习惯先备课」的老师的逃生口：把出题从主链上摘下来，主链变成 `课纲卡 → 阶段 → 页稿`。**但它只是把出题后置到 `build` 之前，不是免除**——没有作业盖章，`build` 会退出 2 说「出题只能后置，不能跳过」，并且在那一刻补跑一次覆盖闸。走这条路线时，`check` 与报告顶部都会印一句「未先出作业」。
+`--route content-first` 是给「习惯先备课」的老师的逃生口：把出题从主链上摘下来，主链变成 `课纲卡 → 阶段 → 页稿`。**但它只是把出题后置到 `build` 之前，不是免除**——没有作业盖章，`build` 会退出 2 说「出题只能后置，不能跳过」，并且在那一刻补跑一次覆盖闸。走这条路线时，`check <slug> pages`、`check <slug> --all` 与报告顶部都会印一句「未先出作业」。
 
 **默认走 `homework-first`。** 只有老师明确要求先写内容时才用 `content-first`，用之前跟他说清楚出题不会被免掉。
 

@@ -139,7 +139,7 @@ lessons/<slug>/
 | `title` | 否 | 页名。只出现在 `notes.html` 的行首，不进投屏 |
 
 - **每个阶段至少要有一页**，否则 ERROR。
-- `covers` 里的 id 必须在 `questions.json` 里存在；`drill:<slug>` 形态的编程题引用**只校验形态**，脚本不会去调用 coding-drill，见 workflow-rules §7。
+- `covers` 里的 id 必须在 `questions.json` 里存在；`drill:<slug>` 形态的编程题引用**只校验形态**，脚本不会去调用 coding-drill，见 workflow-rules §12。
 - **单页 `covers` 最多 3 个**。一页塞进四道题是「贴标签蒙混」最常见的形态，直接 ERROR。
 
 ### `pages/<id>.html` —— 投屏正文
@@ -161,7 +161,7 @@ figure figcaption img br hr
 
 ### `pages/<id>.notes.md` —— 教师讲稿
 
-**纯文本**，讲台上照着念的话。不许出现 HTML 标签。字数下限、不许抄正文的判据同样见 workflow-rules §5。
+**纯文本**，讲台上照着念的话。不许出现 HTML 标签。字数下限、不许抄正文的判据同样见 workflow-rules §8。
 
 讲稿只进 `notes.html`，`build` 会断言每页讲稿的前 40 字不出现在 `deck.html` 里。
 

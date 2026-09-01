@@ -78,10 +78,11 @@ python3 scripts/lessonkit.py repalette <slug> --palette teal  # 只换主题色�
 
 八个主题色：`cyan`（默认）、`indigo`、`emerald`、`amber`、`rose`、`violet`、`slate`、`teal`。壳的 `h1` / `h2` / `th` / `blockquote` 默认吃主题色，纯文本页也看得出换了色。
 
-`examples/lessons/city-wetland/` 是一节跑完整流程的示例课（自撰的八百字中文说明文当课文，45 分钟，7 道题 / 3 阶段 / 9 页正文与讲稿），可以直接试手：
+`examples/lessons/city-wetland/` 是一节跑完整流程的示例课（自撰的八百字中文说明文当课文，45 分钟，7 道题 / 3 阶段 / 9 页正文与讲稿），可以试手。注意 `check --all` 每过一步都会更新课目录里的 `.stamps/` 盖章，直接对 `examples/` 跑会把示例目录改脏——先拷一份出来再跑：
 
 ```bash
-python3 scripts/lessonkit.py check examples/lessons/city-wetland --all
+cp -R examples/lessons/city-wetland lessons/city-wetland-try
+python3 scripts/lessonkit.py check lessons/city-wetland-try --all
 ```
 
 ## 目录

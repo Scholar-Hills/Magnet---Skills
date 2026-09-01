@@ -59,12 +59,14 @@
 
 | 命令 | 跑什么 | 盖什么章 |
 |---|---|---|
-| `check <slug> lesson` | G1 | 通过则写 `.stamps/lesson.json` |
-| `check <slug> questions` | G1 → G2 | 通过则写 `.stamps/questions.json`（含上游哈希） |
-| `check <slug> phases` | G1 → G2 → G4 | 通过则写 `.stamps/phases.json` |
-| `check <slug> pages` | G1 → … → G5/G6/G7 | 通过则写 `.stamps/pages.json` |
-| `check <slug> --all` | 四步**逐步**跑，每步过一步盖一步；末尾再做成品哈希对账 | 逐步盖章，不碰 `.stamps/deck.json` |
-| `build <slug>` | 准入 + 壳断言 | 写 `.stamps/deck.json`（含成品哈希、配色、成品页与失败页） |
+| `check <slug> lesson` | G1（第一步没有上游，不跑 G10） | 通过则写 `.stamps/lesson.json` |
+| `check <slug> questions` | G1 → G10 → G2 | 通过则写 `.stamps/questions.json`（含上游哈希） |
+| `check <slug> phases` | G1 → G10 → G2 → G4 | 通过则写 `.stamps/phases.json` |
+| `check <slug> pages` | G1 → G10 → G2 → G4 → G5/G6/G7 | 通过则写 `.stamps/pages.json` |
+| `check <slug> --all` | 四步**逐步**跑（每步重新盖章，故不做步间 G10 对账）；末尾再做成品哈希对账（G10） | 逐步盖章，不碰 `.stamps/deck.json` |
+| `build <slug>` | G10 上游对账 + 准入 + 壳断言 | 写 `.stamps/deck.json`（含成品哈希、配色、成品页与失败页） |
+
+G10 就是「上游改动 → 下游作废」的哈希对账：先验锁（上游盖章在不在），再比对上游哈希，最后才跑本步闸门。
 
 **只有 0 ERROR 才盖章**，有 WARN 照样盖。`--all` 的每一步是独立判定的：前一步不过就在那里停住，不会拿一份没过的上游去跑下游。
 
