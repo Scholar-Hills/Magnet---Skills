@@ -1,0 +1,144 @@
+{
+  "file": "v1.md",
+  "format": "md",
+  "chars": 1265,
+  "bytes": 3757,
+  "atoms": [
+    {
+      "i": 0,
+      "start": 0,
+      "end": 35,
+      "role": "block",
+      "no": 1,
+      "heading": true,
+      "preview": "# 远程办公者该怎么选城市"
+    },
+    {
+      "i": 1,
+      "start": 35,
+      "end": 37,
+      "role": "space"
+    },
+    {
+      "i": 2,
+      "start": 37,
+      "end": 484,
+      "role": "block",
+      "no": 2,
+      "heading": false,
+      "preview": "远程办公这件事这几年被讨论得很多，很多人都说它会改变我们的生活方式。对一个可以完全远程的人来…"
+    },
+    {
+      "i": 3,
+      "start": 484,
+      "end": 486,
+      "role": "space"
+    },
+    {
+      "i": 4,
+      "start": 486,
+      "end": 1005,
+      "role": "block",
+      "no": 3,
+      "heading": false,
+      "preview": "先算钱。把工位从写字楼搬回家里，省下的通勤时间是白得的，省下的房租却不是——你得把差价乘满一…"
+    },
+    {
+      "i": 5,
+      "start": 1005,
+      "end": 1007,
+      "role": "space"
+    },
+    {
+      "i": 6,
+      "start": 1007,
+      "end": 1454,
+      "role": "block",
+      "no": 4,
+      "heading": false,
+      "preview": "第二件事是网络与它的替补。全职远程的人一年要开几百场会，家里的宽带断一次，损失的不只是那一场…"
+    },
+    {
+      "i": 7,
+      "start": 1454,
+      "end": 1456,
+      "role": "space"
+    },
+    {
+      "i": 8,
+      "start": 1456,
+      "end": 1930,
+      "role": "block",
+      "no": 5,
+      "heading": false,
+      "preview": "说到远程办公，就不能不提最近几年公司这一头的拉扯。不少大公司先是宣布永久远程，过两年又要求每…"
+    },
+    {
+      "i": 9,
+      "start": 1930,
+      "end": 1932,
+      "role": "space"
+    },
+    {
+      "i": 10,
+      "start": 1932,
+      "end": 2283,
+      "role": "block",
+      "no": 6,
+      "heading": false,
+      "preview": "当然，选城市这件事还要综合考虑很多方面的因素。每个人的情况都不一样，适合别人的不一定适合你，…"
+    },
+    {
+      "i": 11,
+      "start": 2283,
+      "end": 2285,
+      "role": "space"
+    },
+    {
+      "i": 12,
+      "start": 2285,
+      "end": 2828,
+      "role": "block",
+      "no": 7,
+      "heading": false,
+      "preview": "再往下是一条不好量化、却最容易让人搬走的：人。通勤取消的同时，同事也取消了。原来一天里那些不…"
+    },
+    {
+      "i": 13,
+      "start": 2828,
+      "end": 2830,
+      "role": "space"
+    },
+    {
+      "i": 14,
+      "start": 2830,
+      "end": 3277,
+      "role": "block",
+      "no": 8,
+      "heading": false,
+      "preview": "最后一条最枯燥，也最容易在签合同之后才发现：手续。医保能不能异地结算、租房备案要不要工作证明…"
+    },
+    {
+      "i": 15,
+      "start": 3277,
+      "end": 3279,
+      "role": "space"
+    },
+    {
+      "i": 16,
+      "start": 3279,
+      "end": 3756,
+      "role": "block",
+      "no": 9,
+      "heading": false,
+      "preview": "所以回到最开始那个问题。远程办公确实把「离公司多近」这一条从选城市的清单上划掉了，但它没有替…"
+    },
+    {
+      "i": 17,
+      "start": 3756,
+      "end": 3757,
+      "role": "space"
+    }
+  ],
+  "blockCount": 9
+}
