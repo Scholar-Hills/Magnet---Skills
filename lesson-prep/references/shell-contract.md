@@ -108,7 +108,7 @@
 
 ### 2.7 外链判据从严：属性值里出现协议字样就拒，注释也不例外
 
-页稿准入与成品复查用同一条外链判据：属性值压掉空白、统一小写、抠掉合法 `data:image` 的 base64 载荷之后，出现 `http:`、`https:` 或协议相对 `//` 即 ERROR。**不按函数名枚举**——`url()`、`image-set()`、`cross-fade()`、`-webkit-image-set()`、`image()` 一视同仁。
+页稿准入与成品复查用同一条外链判据：属性值先做 HTML 实体解码，再压掉空白、统一小写、抠掉合法 `data:image` 的 base64 载荷之后，出现 `http:`、`https:` 或协议相对 `//` 即 ERROR。**不按函数名枚举**——`url()`、`image-set()`、`cross-fade()`、`-webkit-image-set()`、`image()` 一视同仁。样式值经实体解码后不接受反斜杠转义；出现即拒收。
 
 代价是从严误伤：CSS 注释里写个网址（`style="/* 见 https://… */color:red"`）同样被拒。这是刻意的——属性里没有写网址的正当理由，网址请写进正文文字。详见 `references/workflow-rules.md` §5。
 

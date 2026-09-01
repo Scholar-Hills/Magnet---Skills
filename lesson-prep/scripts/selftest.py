@@ -641,6 +641,23 @@ def t_g5(root):
     res = run("check", "g5-dataok", "pages", cwd=root)
     check(res[0] == 0, "data:image 载荷里的 // 不该被外链判据误伤\n%s" % both(res))
 
+    # CSS 反斜杠转义与实体裹协议：浏览器会把 \\68\\74… 解码成 https，协议判扫不到，
+    # 所以 style 值经实体解码后出现反斜杠一律拒收；&sol;&sol; 解码后就是协议相对 //
+    for i, (evil, needle) in enumerate((
+            ("image-set('\\68\\74\\74\\70\\73:\\2f\\2f evil\\2f x' 1x)", "反斜杠"),
+            ("image-set('&#92;68&#92;74&#92;74&#92;70&#92;73:&#92;2f&#92;2f evil&#92;2f x' 1x)",
+             "反斜杠"),
+            ("image-set('&#x5c;68&#X5C;74&#x5c;74&#x5c;70&#x5c;73:&#x5c;2f&#x5c;2f evil' 1x)",
+             "反斜杠"),
+            ("url(&sol;&sol;evil.invalid/x.png)", "外链字样"))):
+        pages = base_pages()
+        pages[0]["html"] = P1_HTML + '<div style="background:%s">底纹</div>' % evil
+        slug = "g5-cssesc-%d" % i
+        make(root, slug, pages=pages)
+        steps_ok(root, slug, "phases")
+        out = expect_fail(root, slug, ("check", slug, "pages"), needle)
+        check("p1" in out, "%s 的报错应指到页 p1\n%s" % (slug, out))
+
     # 成品侧同一条判据：verify_shell 自己也要抓 image-set 外链，不依赖准入闸兜底
     sys.path.insert(0, HERE)
     import lessonkit                                             # noqa: E402
@@ -650,6 +667,14 @@ def t_g5(root):
         "", 0, shell_rep)
     check(any("外链字样" in e["reason"] for e in shell_rep.errors()),
           "verify_shell 应按协议字样抓成品里的 image-set 外链")
+
+    # 成品侧的反斜杠同口径：deck 里 style 值出现 CSS 转义也要在 G9 被拒
+    shell_rep = lessonkit.Rep()
+    lessonkit.verify_shell(
+        "<div style=\"background:image-set('\\68\\74\\74\\70\\73:\\2f\\2f evil\\2f x' 1x)\">"
+        "</div>", "", 0, shell_rep)
+    check(any("反斜杠" in e["reason"] for e in shell_rep.errors()),
+          "verify_shell 应拒收成品 style 值里的反斜杠转义")
 
     # 壳保留的类名：页稿用了就会在成品里多出一页假页
     pages = base_pages()
@@ -750,7 +775,8 @@ def t_g5(root):
     steps_ok(root, "g5-drillbad", "phases")
     expect_fail(root, "g5-drillbad", ("check", "g5-drillbad", "pages"), "drill:")
     return ("G5：5 组消毒绕过 + 外链图 + 缺图文件 + 白名单外标签 + style 的 url() 三种外链写法 + "
-            "image-set 家族与注释网址 5 种协议字样（成品侧 verify_shell 同判据） + "
+            "image-set 家族与注释网址 5 种协议字样 + CSS 反斜杠转义／&#92; 实体／&sol; 拼协议相对 "
+            "4 种裹协议写法（成品侧 verify_shell 同判据，反斜杠也拒） + "
             "壳保留类名 + 页稿写 data-page-id + 7 种占位 + 空 figure + 密度双档 + 阶段无页 + "
             "covers 悬空 全被判死；drill:<slug>、本地底图、data:image 载荷、普通类名与普通 data-* 不误伤")
 
@@ -860,6 +886,28 @@ def t_cheats(root):
     steps_ok(root, "cheat-nearcopy", "phases")
     expect_fail(root, "cheat-nearcopy", ("check", "cheat-nearcopy", "pages"), "抄正文当讲稿")
     notes.append("③b 讲稿抄 %.0f%% 正文再添新话（重合率 %.2f）→ 抄正文当讲稿" % (90, ratio))
+
+    # ③c 重合率钉在 (0.80, 0.90) 的下侧边界：③b 落在 0.9 以上，只防得住阈值抬到
+    #    0.999 的变异；把 COPY_RATIO 从 0.8 悄悄抬到 0.9，③b 照样红、变异就活了。
+    #    这条用例的重合率落在两档之间，0.8→0.9 与 0.8→0.999 两个方向的变异都判死。
+    mid_tail = ("以下是讲稿自己的安排：请第一排的同学把桌面清空只留笔，随后两人一组互相口述"
+                "刚才的结论，口述完各自在练习册背面默写一遍关键词，写错的用铅笔圈出来。"
+                "教师沿过道巡视一圈，挑两份写法不同的举给全班看，请大家评一评谁的表述更严谨，"
+                "最后齐读黑板中间那句话收束。")
+    mid_copy = body[: int(len(body) * 0.82)] + "\n" + mid_tail
+    mid_ratio = lessonkit.overlap_ratio(lessonkit.bigrams(mid_copy), lessonkit.bigrams(body))
+    check(0.80 < mid_ratio < 0.90,
+          "下侧边界用例失守：重合率 %.3f 应落在 0.80 与 0.90 之间，"
+          "否则钉不住 COPY_RATIO 被抬到 0.9 的变异" % mid_ratio)
+    check(lessonkit.text_len(mid_copy) >= lessonkit.text_len(body),
+          "下侧边界用例的讲稿字数应不少于正文，免得先撞上字数闸")
+    pages = base_pages()
+    pages[1]["notes"] = mid_copy
+    make(root, "cheat-midcopy", pages=pages)
+    steps_ok(root, "cheat-midcopy", "phases")
+    expect_fail(root, "cheat-midcopy", ("check", "cheat-midcopy", "pages"), "抄正文当讲稿")
+    notes.append("③c 讲稿抄 82%% 正文再添新话（重合率 %.2f，落在 0.80 与 0.90 之间）"
+                 "→ 抄正文当讲稿" % mid_ratio)
 
     # ④ 讲稿只有一个字
     pages = base_pages()

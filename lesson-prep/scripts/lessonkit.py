@@ -366,16 +366,24 @@ def url_verdict(value):
     return "危险 URL 协议「%s:」" % hit.group(1)
 
 
-def external_url_verdict(value):
+def external_url_verdict(value, css=False):
     """None 表示没有外链字样，否则给一句中文说明。
 
     判据故意不按写法枚举：`url()`、`image-set()`、`cross-fade()`、`-webkit-image-set()`、
-    `image()` 换个函数名就能绕开枚举，所以只认协议字样本身——属性值压掉空白、统一小写、
+    `image()` 换个函数名就能绕开枚举，所以只认协议字样本身——属性值先做 HTML 实体解码
+    （防 `&#92;` 藏反斜杠、`&sol;` 藏斜杠这类写法多裹一层），再压掉空白、统一小写、
     抠掉合法 data:image 的 base64 载荷之后，出现 `http:`、`https:` 或 `//`（协议相对，
     `http://` 与 `https://` 也都含它）即判外链。CSS 注释里的网址一样算：属性里没有
     写网址的正当理由，网址请写进正文文字。准入（G5）与成品复查（G9）用的是同一条。
+
+    css=True 表示这是 CSS 上下文（style 属性值）：浏览器会把 `\\68\\74\\74\\70\\73`
+    这类 CSS 转义解码成协议字样，协议判扫不到，所以解码后出现反斜杠一律拒收——
+    教学页稿的合法 CSS 值用不到反斜杠转义，宁枉勿纵，不做完整 CSS 解析器。
     """
-    flat = DATA_IMAGE_PAYLOAD.sub("data:image", squash_url(value))
+    decoded = htmllib.unescape(value or "")
+    if css and "\\" in decoded:
+        return "反斜杠转义（样式值经实体解码后不接受反斜杠转义）"
+    flat = DATA_IMAGE_PAYLOAD.sub("data:image", squash_url(decoded))
     if "//" in flat or re.search(r"https?:", flat):
         return "外链字样（http://、https:// 或协议相对 //）"
     return None
@@ -459,8 +467,9 @@ class _Scan(HTMLParser):
             verdict = url_verdict(value)
             if verdict:
                 self._bad("属性 %s 里出现%s" % (key, verdict))
-            # 外链判据按协议字样判，不按 url()/image-set() 这类写法枚举（见 external_url_verdict）
-            verdict = external_url_verdict(value)
+            # 外链判据按协议字样判，不按 url()/image-set() 这类写法枚举（见 external_url_verdict）；
+            # style 属性是 CSS 上下文，实体解码后出现反斜杠转义即拒收
+            verdict = external_url_verdict(value, css=(key == "style"))
             if verdict:
                 self._bad("属性 %s 里出现%s" % (key, verdict))
             if key == "class":
@@ -533,8 +542,10 @@ class _ExternalScan(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         for key, value in attrs:
-            if external_url_verdict(value):
-                self.hits.append((tag.lower(), (key or "").lower()))
+            low = (key or "").lower()
+            verdict = external_url_verdict(value, css=(low == "style"))
+            if verdict:
+                self.hits.append((tag.lower(), low, verdict))
 
 
 EMPTY_TAGS = frozenset(("img", "br", "hr", "col"))
@@ -773,9 +784,10 @@ def verify_shell(deck, notes, ready_count, rep):
         rep.bad("G9", "notes.html", "讲稿页缺打印 CSS")
     if "<script" in notes:
         rep.bad("G9", "notes.html", "讲稿页里不许有脚本")
-    # 外链复查与页稿准入是同一条判据：属性值里出现协议字样（http://、https://、
+    # 外链复查与页稿准入是同一条判据：属性值实体解码后出现协议字样（http://、https://、
     # 协议相对 //）即报，不按 src= 或 url( 的写法枚举——image-set()/cross-fade()
-    # 换个函数名也一样抓；合法的 data:image 内嵌图不受影响。deck 与 notes 都查。
+    # 换个函数名也一样抓；style 属性值里出现反斜杠转义同样拒收；合法的 data:image
+    # 内嵌图不受影响。deck 与 notes 都查。
     for name, doc in (("deck.html", deck), ("notes.html", notes)):
         scan = _ExternalScan()
         try:
@@ -783,9 +795,9 @@ def verify_shell(deck, notes, ready_count, rep):
             scan.close()
         except Exception as e:
             rep.bad("G9", name, "成品 HTML 解析失败：%s" % e)
-        for tag, key in scan.hits:
-            rep.bad("G9", name, "成品里不许有外链资源：<%s> 的 %s 属性里出现外链字样"
-                                "（http://、https:// 或协议相对 //）" % (tag, key))
+        for tag, key, verdict in scan.hits:
+            rep.bad("G9", name, "成品里不许有外链资源：<%s> 的 %s 属性里出现%s"
+                    % (tag, key, verdict))
 
 
 # ---------------------------------------------------------------- 工作区

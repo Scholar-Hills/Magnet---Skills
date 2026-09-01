@@ -162,7 +162,7 @@ python3 "$KIT" check <slug> --all        # 四步复核 + 成品哈希对账，0
 完整规则见 `references/workflow-rules.md` §4–§7，写页稿前必读。最常撞的四条：
 
 **一、图片只许两种来源。** `<img src="assets/xxx.png">`（文件必须真实存在）或者 `data:image/…;base64,`（≤ 2 MB）。外链一律 ERROR，`style` 里的 `url()` 同判——教室断网时外链就是一块白。
-**外链判据不按写法枚举**：任何属性值里出现 `http://`、`https://` 或协议相对 `//` 就是 ERROR（合法 `data:image` 内嵌图的 base64 载荷除外），`image-set()`、`cross-fade()` 这类不带 `url(` 的 CSS 函数换个马甲也一样抓，CSS 注释里的网址同样被拒；成品侧还会用同一条判据复查一遍。
+**外链判据不按写法枚举**：任何属性值里出现 `http://`、`https://` 或协议相对 `//` 就是 ERROR（合法 `data:image` 内嵌图的 base64 载荷除外），`image-set()`、`cross-fade()` 这类不带 `url(` 的 CSS 函数换个马甲也一样抓，CSS 注释里的网址同样被拒；样式值经实体解码后不接受反斜杠转义，出现即拒收；成品侧还会用同一条判据复查一遍。
 
 **二、13 个壳保留类名会被拒收。** `slide` `pad` `fit` `stage` `rail` `thumb` `talk` `row` `wrap` `say` `no` `hd` `sub`——这些是成品壳自己的结构名，页稿里再用一次，翻页脚本就会把假页当真页数进去（页码变成 1/4、真页内容被藏掉）。
 **注意 `row`、`no`、`sub`、`wrap` 这几个是最容易随手写的普通英文词**：两栏布局写 `class="row"`、序号写 `class="no"`、副标题写 `class="sub"`，全都会被拒收。换成 `cols` / `idx` / `subtitle` 就行。`data-page-id` 与 `data-talk-id` 两个属性同样保留。普通的 `data-*` 与 `aria-*` 不受影响。
