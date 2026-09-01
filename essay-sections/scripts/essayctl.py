@@ -19,7 +19,7 @@
   reflect add <slug> [--segment …] --from … 写一条反思（区域反思要评分触发）
   reading add <slug> <segment> --from …     记一份荐读（默认标「引用未核实」）
   version <slug>                            给 sections/ 拍一个版本快照
-  status <slug>                             每段一行：哈希、mtime、最新分、走势、过期标记
+  status <slug>                             每段一个块：哈希、mtime、最新分、走势、过期标记
   report <slug>                             生成 report.html 分段卡
   export <slug> [--evidence]                导出整篇（带侧注）或脱敏证据包
   check <slug|dir> [--rebuild-index]        离线复核整个工作区（发布闸第 2 项）
@@ -1401,7 +1401,7 @@ def trend_of(rows):
 
 
 def segment_view(ws):
-    """每段一行，status 与 report 共用同一份数据。"""
+    """每段一份视图数据：status 的分段块与 report 的分段卡共用。"""
     view = []
     for seg in ws.essay().get("segments") or []:
         name = seg["name"]
@@ -1558,7 +1558,7 @@ def cmd_report(args):
             '<title>分段卡 · %s</title><style>%s</style></head><body><div class="wrap">'
             '<h1>%s</h1><div class="meta">%s · %d 段 · 未纳入分段 %d 条（有字的 %d 条）'
             ' · 生成于 %s</div>'
-            '%s%s<p class="foot">三个格子只说这一段答没答自己的问题，不是查重，也不是改稿。'
+            '%s%s<p class="foot">三个格子只说这一段答没答自己的问题，不核对文献重合，也不是改稿。'
             '引用都是从你自己的原文里逐字取的。要改句子，把那一段丢给 red-pen。</p>'
             '</div></body></html>\n'
             % (esc(ws.slug), _HTML_CSS, esc(data.get("title") or ws.slug),

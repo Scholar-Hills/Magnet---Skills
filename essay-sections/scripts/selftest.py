@@ -1232,7 +1232,8 @@ def t_report_cards(root):
     check("<script" not in page.lower(), "report 不许带脚本")
     check(DEFAULT_NOTE[:12] in page, "report 应带上评语")
     check("走势" in page, "report 应画走势点")
-    return "分段卡带三维格子、逐字引用与走势点，无脚本无外链"
+    check("查重" not in page, "对外文案不提「查重」这类本 Skill 不做的能力")
+    return "分段卡带三维格子、逐字引用与走势点，无脚本无外链，页脚不提「查重」"
 
 
 def t_check_examples(root):
