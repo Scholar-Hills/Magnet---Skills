@@ -9,6 +9,7 @@ report → export → check 全流程，逐条验证 19 条闸门的正反例与
 所有稿件、题目、评语都是合成的，跑完临时目录删除。
 """
 
+import hashlib
 import io
 import json
 import os
@@ -214,6 +215,15 @@ def ws_of(root):
 
 def norm(text):
     return re.sub(r"\s+", " ", text).strip()
+
+
+def canon(obj):
+    """跟 essayctl.canonical 同口径：账本行就是这么写出来的。"""
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def sha256_hex(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------- 建工作区
@@ -516,6 +526,53 @@ def t_outline_rounds(root):
     return "初始 6–10、增补 ≤4、去重与空题拒收、第 5 轮被拒且字节不变"
 
 
+def t_outline_bind(root):
+    """bind 模式：先贴稿拆好段，再补子问题——条数必须正好等于已有正文段数。"""
+    groups = {"intro": [2], "body": [[3, 4, 5], [6, 7, 8]], "conclusion": [9]}
+    ws = built(root, groups=groups)
+    meta = load(os.path.join(ws, "essay.json"))
+    body = [s for s in meta["segments"] if s["name"].startswith("body-")]
+    check(len(body) == 2, "这一轮先拆成 2 个正文段：%r" % [s["name"] for s in meta["segments"]])
+    check(body[0]["subquestion"] == "", "还没绑之前正文段没有子问题：%r" % body[0])
+    before_hash = ctx(root, "body-01")["contextHash"]
+
+    # 反例：2 个正文段却给 3 条，拒收且工作区一个字节不许动
+    frozen_essay = read(os.path.join(ws, "essay.json"))
+    frozen_outline = read(os.path.join(ws, "outline.jsonl"))
+    path = os.path.join(ws, "inbox", "outline.json")
+    write_json(path, {"items": ["谁真的搬走了", "谁留下了", "多出来的一条"]})
+    rc, out, err = run(root, "outline", "add", SLUG, "--from", path)
+    check(rc == 1, "2 个正文段给 3 条子问题应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check(read(os.path.join(ws, "essay.json")) == frozen_essay, "被拒的一轮不许改 essay.json")
+    check(read(os.path.join(ws, "outline.jsonl")) == frozen_outline, "被拒的一轮不许写账本")
+    check(ctx(root, "body-01")["contextHash"] == before_hash, "被拒的一轮不许影响 contextHash")
+
+    # 正例：正好 2 条，按序绑上去
+    write_json(path, {"items": ["谁真的搬走了", "谁留下了"]})
+    out = ok(root, "outline", "add", SLUG, "--from", path)
+    check("bind" in out, "这一轮应走 bind 模式：\n%s" % out)
+    check(len(lines_of(os.path.join(ws, "outline.jsonl"))) == 1, "bind 也占一轮")
+    row = json.loads(lines_of(os.path.join(ws, "outline.jsonl"))[0])
+    check(row["mode"] == "bind", "账本行应记下 mode=bind：%r" % row)
+
+    meta = load(os.path.join(ws, "essay.json"))
+    names = [s["name"] for s in meta["segments"]]
+    check(names == ["intro", "body-01", "body-02", "conclusion"],
+          "绑定不该凭空多出正文段：%r" % names)
+    body = dict((s["name"], s["subquestion"]) for s in meta["segments"])
+    check(body["body-01"] == "谁真的搬走了" and body["body-02"] == "谁留下了",
+          "子问题应按序绑到正文段：%r" % body)
+    pack = ctx(root, "body-01")
+    check(pack["subquestion"] == "谁真的搬走了", "context 应带上刚绑的子问题：%r" % pack["subquestion"])
+    check(pack["contextHash"] != before_hash, "子问题进了 contextHash，绑完哈希必须变")
+    for name in ("intro", "conclusion"):
+        text = read(os.path.join(ws, "sections", "%s.md" % name))
+        check(text.strip(), "绑定不许把已有的 %s 正文清空" % name)
+    out = ok(root, "check", SLUG)
+    check("0 个 ERROR" in out, "绑完 check 应 0 ERROR：\n%s" % out)
+    return "bind：2 段给 3 条拒且字节不变；正好 2 条按序绑上，contextHash 随之变，check 0 ERROR"
+
+
 def t_thin_segment(root):
     """评审准入闸：纯文本不足 10 字，context 拒绝输出、review add 拒收。"""
     ws = built(root)
@@ -724,16 +781,133 @@ def t_chain_tamper(root):
     rc, out, err = run(root, "check", SLUG)
     check(rc == 1 and "ERROR" in out, "删掉末行必须 ERROR，rc=%d\n%s%s" % (rc, out, err))
 
-    write(path, good.rstrip("\n") + "\n" +
-          json.dumps({"seq": 4, "stage": "review", "segment": "body-06",
-                      "scores": {"language": 5, "answersSubquestion": 5, "advancesThesis": 5},
-                      "composite": 5, "prevHash": "0" * 64}, ensure_ascii=False) + "\n")
+    # 追加的这一行不是稻草人：seq 接得上、prevHash 是上一行真实的 sha256、
+    # 字节也按脚本的规范 JSON 排好——只剩 chains.json 的链尾能识破它。
+    kept = [ln for ln in good.split("\n") if ln.strip()]
+    forged = canon({"seq": len(kept) + 1, "when": "2026-09-01T00:00:00Z", "stage": "review",
+                    "segment": "body-06", "versionNumber": 0, "segmentText": "伪造",
+                    "segmentHash": sha256_hex("伪造"), "subquestion": "", "thesis": "",
+                    "background": {}, "reflectionPack": [], "contextHash": "0" * 64,
+                    "scores": {"language": 5, "answersSubquestion": 5, "advancesThesis": 5},
+                    "composite": 5, "note": "伪造的一行", "quotes": ["伪造"],
+                    "sameDraft": False, "flags": [], "prevHash": sha256_hex(kept[-1])})
+    write(path, "\n".join(kept + [forged]) + "\n")
     rc, out, err = run(root, "check", SLUG)
-    check(rc == 1 and "ERROR" in out, "手动追加一行必须 ERROR，rc=%d\n%s%s" % (rc, out, err))
+    check(rc == 1 and "ERROR" in out,
+          "手动追加一行（seq 与 prevHash 都算对）必须 ERROR，rc=%d\n%s%s" % (rc, out, err))
 
     write(path, good)
     ok(root, "check", SLUG)
-    return "改中间行 / 删末行 / 手动追加 三种篡改都 ERROR，还原后复绿"
+    return "改中间行 / 删末行 / 手动追加（含算对 prevHash 的）三种篡改都 ERROR，还原后复绿"
+
+
+def t_chain_index_known_limit(root):
+    """已知限界（不是 bug，是 spec §风险 8 认过的账）：链尾索引 chains.json 跟账本一起改就过。
+
+    prevHash 链只能发现「有人动过行」，末行没有下一行给它作证，所以得靠 chains.json
+    记链尾。谁知道这个文件存在，两处一起改就能把删末行 / 追加行做成 0 ERROR
+    （seq 跳号仍然抓得住）。这条用例把这个边界钉死：将来有人以为它被挡住了，
+    这里会告诉他没有。README 安全段与 workspace-format.md 必须按同一口径写。
+    """
+    ws = built(root)
+    for i in (1, 2, 3):
+        seg = os.path.join(ws, "sections", "body-06.md")
+        if i > 1:
+            write(seg, read(seg) + "\n\n第 %d 次改稿补的一句话。\n" % i)
+        add_review_ok(root, ws, "body-06", note="第 %d 次评审，这一步还要再说白一点。" % i)
+    path = os.path.join(ws, "ledger", "body-06.jsonl")
+    chains_path = os.path.join(ws, "chains.json")
+    rel = "ledger/body-06.jsonl"
+    good = read(path)
+    kept = [ln for ln in good.split("\n") if ln.strip()]
+
+    def sync(lines):
+        write(path, "\n".join(lines) + "\n")
+        tips = load(chains_path)
+        tips[rel] = {"seq": len(lines), "hash": sha256_hex(lines[-1])}
+        write_json(chains_path, tips)
+
+    # 1) 删末行 + 同步改索引 → 0 ERROR（已知限界）
+    sync(kept[:-1])
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "已知限界：删末行并同步改 chains.json 目前是 0 ERROR，"
+                   "如果这里开始报错说明护栏变强了，请连报告一起更新。rc=%d\n%s%s" % (rc, out, err))
+
+    # 2) 改中间行 + 重算后续 prevHash + 同步改索引 → 0 ERROR（已知限界）
+    rows = [json.loads(ln) for ln in kept]
+    rows[1]["note"] = "重造过的一行评语，链上下都算对了。"
+    rebuilt = []
+    prev = json.loads(kept[0])["prevHash"]
+    for i, row in enumerate(rows):
+        row["prevHash"] = prev if i == 0 else sha256_hex(rebuilt[-1])
+        rebuilt.append(canon(row))
+        prev = row["prevHash"]
+    sync(rebuilt)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "已知限界：整链重造并同步改 chains.json 目前是 0 ERROR，rc=%d\n%s%s"
+          % (rc, out, err))
+
+    # 3) 但 seq 跳号仍然抓得住——重造得连 seq 一起编才行
+    broken = list(rebuilt)
+    row = json.loads(broken[-1])
+    row["seq"] = 99
+    broken[-1] = canon(row)
+    sync(broken)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1 and "seq" in out, "seq 跳号即使同步改了索引也必须 ERROR，rc=%d\n%s%s"
+          % (rc, out, err))
+    return "已知限界：同步改 chains.json 能把删末行与整链重造做成 0 ERROR；seq 跳号仍抓得住"
+
+
+def t_chain_rebuild_index(root):
+    """写盘被打断（追加了行、索引没跟上）不该把用户当篡改者：check --rebuild-index 能修。"""
+    ws = built(root)
+    add_review_ok(root, ws, "body-01")
+    add_review_ok(root, ws, "body-02")
+    ok(root, "check", SLUG)
+    chains_path = os.path.join(ws, "chains.json")
+    good_chains = read(chains_path)
+
+    # A. chains.json 整个丢了 → 报错并指路 --rebuild-index → 重建后 0 ERROR
+    os.remove(chains_path)
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1, "chains.json 丢了应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("--rebuild-index" in out, "应告诉用户可以用 --rebuild-index 修：\n%s" % out)
+    out = ok(root, "check", SLUG, "--rebuild-index")
+    check("重建" in out and "0 个 ERROR" in out, "重建之后应 0 ERROR：\n%s" % out)
+    ok(root, "check", SLUG)
+    check(os.path.isfile(chains_path), "重建应写回 chains.json")
+
+    # B. 追加了合法一行、索引停在上一条（模拟 append_row 两步之间被打断）
+    write(chains_path, good_chains)
+    path = os.path.join(ws, "ledger", "body-01.jsonl")
+    kept = [ln for ln in read(path).split("\n") if ln.strip()]
+    row = json.loads(kept[-1])
+    row["seq"] = len(kept) + 1
+    row["prevHash"] = sha256_hex(kept[-1])
+    row["note"] = "写盘被打断之前落下来的那一条评语，内容是真的。"
+    write(path, "\n".join(kept + [canon(row)]) + "\n")
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1 and "--rebuild-index" in out,
+          "索引落后一条应退出 1 并指路重建，rc=%d\n%s%s" % (rc, out, err))
+    out = ok(root, "check", SLUG, "--rebuild-index")
+    check("0 个 ERROR" in out, "重建之后应 0 ERROR：\n%s" % out)
+
+    # C. 链自身断了的时候，--rebuild-index 必须拒绝重建，不许把篡改盖过去
+    kept = [ln for ln in read(path).split("\n") if ln.strip()]
+    hacked = kept[0].replace('"language":4', '"language":5', 1)
+    check(hacked != kept[0], "用例本身要能改到第一行的分值：%s" % kept[0][:120])
+    kept[0] = hacked
+    write(path, "\n".join(kept) + "\n")
+    tips = load(chains_path)
+    tips["ledger/body-01.jsonl"] = {"seq": 1, "hash": "0" * 64}   # 索引同时也落后了
+    write_json(chains_path, tips)
+    frozen = read(chains_path)
+    rc, out, err = run(root, "check", SLUG, "--rebuild-index")
+    check(rc == 1 and "拒绝" in out,
+          "链自身断了时 --rebuild-index 必须拒绝重建，rc=%d\n%s%s" % (rc, out, err))
+    check(read(chains_path) == frozen, "被拒绝的重建不许改动 chains.json 字节")
+    return "索引丢失 / 落后一条都能 --rebuild-index 修好；链自身断了时拒绝重建且不动索引"
 
 
 def t_reflect_trigger(root):
@@ -905,6 +1079,29 @@ def t_version_gate(root):
     return "版本递增、manifest 哈希、篡改旧快照必 ERROR"
 
 
+def t_version_numbering(root):
+    """编号按最大号 +1，不按目录个数：中间那一版被删掉也不许撞号、不许覆盖。"""
+    ws = built(root)
+    for want in ("v1", "v2", "v3"):
+        out = ok(root, "version", SLUG)
+        check(want in out, "应拍出 %s：\n%s" % (want, out))
+    keep = load(os.path.join(ws, "versions", "v3", "manifest.json"))
+    shutil.rmtree(os.path.join(ws, "versions", "v2"))
+
+    out = ok(root, "version", SLUG)
+    check("v4" in out, "删掉 v2 之后再拍应该是 v4（最大号 +1），不是 v3：\n%s" % out)
+    check(sorted(os.listdir(os.path.join(ws, "versions"))) == ["v1", "v3", "v4"],
+          "目录应是 v1 / v3 / v4：%r" % sorted(os.listdir(os.path.join(ws, "versions"))))
+    check(load(os.path.join(ws, "versions", "v3", "manifest.json")) == keep,
+          "v3 的 manifest 不许被后来那一版覆盖")
+    add_review_ok(root, ws, "body-01")
+    row = ledger_rows(ws, "body-01")[-1]
+    check(row["versionNumber"] == 4, "账本行记的版本号应是最新版本 4，不是版本个数 3：%r" % row)
+    out = ok(root, "check", SLUG)
+    check("0 个 ERROR" in out, "缺了中间一版不算错：\n%s" % out)
+    return "编号按最大号 +1：删掉 v2 后再拍是 v4，v3 不被覆盖，账本记的是最新版本号"
+
+
 def t_check_workspace(root):
     """工作区一致性闸：干净的退出 0；inbox 有残留、账本对不上原文都 ERROR。"""
     ws = built(root)
@@ -1042,6 +1239,7 @@ SELFTESTS = (
     t_assemble_fallback,
     t_import_docx,
     t_outline_rounds,
+    t_outline_bind,
     t_thin_segment,
     t_context_shape,
     t_stale_hash,
@@ -1051,12 +1249,15 @@ SELFTESTS = (
     t_hollow_gate,
     t_same_draft_trend,
     t_chain_tamper,
+    t_chain_index_known_limit,
+    t_chain_rebuild_index,
     t_reflect_trigger,
     t_reflect_pack,
     t_segment_changed,
     t_status_mtime,
     t_reading_gate,
     t_version_gate,
+    t_version_numbering,
     t_check_workspace,
     t_check_recompute,
     t_export_evidence,

@@ -22,7 +22,7 @@
   status <slug>                             每段一行：哈希、mtime、最新分、走势、过期标记
   report <slug>                             生成 report.html 分段卡
   export <slug> [--evidence]                导出整篇（带侧注）或脱敏证据包
-  check <slug|dir>                          离线复核整个工作区（发布闸第 2 项）
+  check <slug|dir> [--rebuild-index]        离线复核整个工作区（发布闸第 2 项）
 
 退出码：0 通过 / 1 闸门不过 / 2 用法或前置条件不满足。
 目录与 JSON 契约见 references/workspace-format.md；纪律见 references/workflow-rules.md。
@@ -336,7 +336,7 @@ class Workspace(object):
     def reflections(self):
         return [r for r in self.rows(REFLECT_NAME) if r.get("stage") == "reflect"]
 
-    def version_dirs(self):
+    def version_numbers(self):
         base = self.at(VERSIONS)
         if not os.path.isdir(base):
             return []
@@ -344,11 +344,39 @@ class Workspace(object):
         for name in os.listdir(base):
             m = VERSION_RE.match(name)
             if m and os.path.isdir(os.path.join(base, name)):
-                found.append((int(m.group(1)), name))
-        return [name for _, name in sorted(found)]
+                found.append(int(m.group(1)))
+        return sorted(found)
+
+    def version_dirs(self):
+        return ["v%d" % n for n in self.version_numbers()]
 
     def version_count(self):
-        return len(self.version_dirs())
+        return len(self.version_numbers())
+
+    def latest_version(self):
+        """编号只增不回收：中间那一版被删掉了，下一版也接着最大号往后排，绝不撞号。"""
+        numbers = self.version_numbers()
+        return numbers[-1] if numbers else 0
+
+    def chain_rels(self):
+        """这个工作区里的三类账本（拆题 / 反思 / 每段评审），按固定顺序。"""
+        rels = [OUTLINE_NAME, REFLECT_NAME]
+        base = self.at(LEDGER)
+        if os.path.isdir(base):
+            for name in sorted(os.listdir(base)):
+                if name.endswith(".jsonl"):
+                    rels.append("%s/%s" % (LEDGER, name))
+        return rels
+
+    def rebuild_chains(self):
+        """按各条链的实际内容重写链尾索引；只在每条链自身复算自洽时才该调用。"""
+        tips = {}
+        for rel in self.chain_rels():
+            lines = self.raw_lines(rel)
+            if lines:
+                tips[rel] = {"seq": len(lines), "hash": sha256_text(lines[-1])}
+        write_json(self.chains_path, tips)
+        return tips
 
     def consume(self, path):
         """脚本消费掉 inbox/ 里的载荷；载荷在别处就不动它。"""
@@ -1213,7 +1241,7 @@ def cmd_review_add(args):
     scores = payload["scores"]
     row = dict(material)
     row.update({"stage": "review", "segment": args.segment,
-                "versionNumber": ws.version_count(),
+                "versionNumber": ws.latest_version(),
                 "segmentHash": segment_hash, "contextHash": out["contextHash"],
                 "scores": dict((d, scores[d]) for d in DIMS),
                 "composite": round_half_up(sum(scores[d] for d in DIMS) / 3.0),
@@ -1255,7 +1283,7 @@ def cmd_reflect_add(args):
         raise GateError(["ERROR 反思剥掉标签之后有 %d 字，超过 %d 字上限。"
                          % (len(text), REFLECT_MAX)])
 
-    row = {"stage": "reflect", "text": text, "versionNumber": ws.version_count()}
+    row = {"stage": "reflect", "text": text, "versionNumber": ws.latest_version()}
     if args.segment:
         check_segment(args.segment)
         ws.segment_entry(args.segment)
@@ -1341,7 +1369,7 @@ def cmd_version(args):
     names = ws.segment_names()
     if not names:
         raise UsageError("还没有任何分区，没什么可以拍快照的。")
-    number = ws.version_count() + 1
+    number = ws.latest_version() + 1
     target = ws.at(VERSIONS, "v%d" % number)
     os.makedirs(target, exist_ok=True)
     files = {}
@@ -1590,7 +1618,13 @@ def cmd_export(args):
 
 # ---------------------------------------------------------------- check
 
-def check_chain(ws, rel, bad):
+def check_chain(ws, rel, bad, index_bad):
+    """复核一条链。
+
+    两类问题分开报：`bad` 是链自身的毛病（行被改、断链、seq 跳号），只能人去查；
+    `index_bad` 是链尾索引 chains.json 跟不上，可能只是脚本写到一半被打断，
+    在链自身自洽的前提下 `check --rebuild-index` 能修。
+    """
     lines = ws.raw_lines(rel)
     tips = ws.chains().get(rel)
     prev = GENESIS
@@ -1611,11 +1645,12 @@ def check_chain(ws, rel, bad):
         prev = sha256_text(line)
     if lines:
         if not tips:
-            bad.append("ERROR %s 没有链尾索引，chains.json 对不上。" % rel)
+            index_bad.append("ERROR %s 没有链尾索引，chains.json 对不上。" % rel)
         elif tips.get("seq") != len(lines) or tips.get("hash") != sha256_text(lines[-1]):
-            bad.append("ERROR %s 的链尾对不上索引：有人删了末行或手动追加过。" % rel)
+            index_bad.append("ERROR %s 的链尾对不上索引：有人删了末行或手动追加过，"
+                             "也可能是脚本写到一半被打断。" % rel)
     elif tips:
-        bad.append("ERROR %s 空了，但 chains.json 里还记着 %d 行。" % (rel, tips.get("seq")))
+        index_bad.append("ERROR %s 空了，但 chains.json 里还记着 %d 行。" % (rel, tips.get("seq")))
     return [json.loads(ln) for ln in lines]
 
 
@@ -1653,8 +1688,9 @@ def cmd_check(args):
             if at != len(raw) or rebuilt != raw:
                 bad.append("ERROR 保真校验没过：按偏移拼回来的字节与 source.txt 不一致。")
 
-    check_chain(ws, OUTLINE_NAME, bad)
-    reflections = check_chain(ws, REFLECT_NAME, bad)
+    chain_bad, index_bad = [], []
+    check_chain(ws, OUTLINE_NAME, chain_bad, index_bad)
+    reflections = check_chain(ws, REFLECT_NAME, chain_bad, index_bad)
     current = {}
     for name in names:
         path = ws.section_path(name)
@@ -1663,7 +1699,7 @@ def cmd_check(args):
     seen_notes = {}
     for name in names:
         rel = ws.ledger_rel(name)
-        for row in check_chain(ws, rel, bad):
+        for row in check_chain(ws, rel, chain_bad, index_bad):
             if row.get("stage") != "review":
                 continue
             seq = row.get("seq")
@@ -1734,10 +1770,33 @@ def cmd_check(args):
             bad.append("ERROR inbox/ 里还剩 %d 份载荷没被脚本消费：%s"
                        % (len(left), "、".join(left)))
 
+    # 链尾索引落后或缺失：链自身自洽时可以重建，链自身断了就不许拿重建盖过去
+    hints = []
+    if index_bad:
+        want = getattr(args, "rebuild_index", False)
+        if want and not chain_bad:
+            tips = ws.rebuild_chains()
+            hints.append("已按各条链的实际内容重建 %s（%d 条链）。" % (CHAINS_NAME, len(tips)))
+            hints.append("注意：重建信的是账本文件本身，它只修「索引落后」，"
+                         "不能替你证明没人往账本里加过行。")
+            index_bad = []
+        else:
+            bad.extend(index_bad)
+            if chain_bad and want:
+                hints.append("--rebuild-index 拒绝动手：链自身就是断的，重建只会把篡改盖过去。"
+                             "先照上面的行号把账本查清楚。")
+            elif not chain_bad:
+                hints.append("每条链自身逐行复算都是自洽的，对不上的只有索引 %s。" % CHAINS_NAME)
+                hints.append("如果确认没有人动过账本（比如上一次写盘被打断），可以跑："
+                             "check %s --rebuild-index" % ws.slug)
+    bad.extend(chain_bad)
+
     for line in warn:
         print(line)
     for line in bad:
         print(line)
+    for line in hints:
+        print("      %s" % line)
     print("check %s：%d 个 ERROR，%d 个 WARN。" % (ws.slug, len(bad), len(warn)))
     return 1 if bad else 0
 
@@ -1812,6 +1871,9 @@ def build_parser():
     e.add_argument("--evidence", action="store_true", help="只导哈希与分数，不带正文")
     k = sub.add_parser("check", help="离线复核整个工作区")
     k.add_argument("slug", help="稿名或工作区目录")
+    k.add_argument("--rebuild-index", dest="rebuild_index", action="store_true",
+                   help="链自身自洽、只是链尾索引落后或缺失时，按账本实际内容重建 %s"
+                        % CHAINS_NAME)
     return p
 
 
