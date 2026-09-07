@@ -12,3 +12,21 @@ internal/
 .superpowers/
 # agent worktree 检出
 .claude/worktrees/
+
+# Claude Code 本机状态(settings.local.json 含个人权限白名单与口令;其余为运行时文件)
+# settings.json 是团队共享配置,继续跟踪
+.claude/settings.local.json
+.claude/checkpoints/
+.claude/mailbox/
+.claude/routines/.state/
+.claude/scheduled_tasks.json
+.claude/scheduled_tasks.lock
+.claude/agent-registry.json
+.claude/agent-memory-local
+.claude/first-run
+.claude/assistant-daemon-state.json
+
+# 合并/备份副本、Windows 缩略图
+*.orig
+*.bak
+Thumbs.db
