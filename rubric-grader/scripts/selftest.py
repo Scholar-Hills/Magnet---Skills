@@ -815,9 +815,14 @@ def t_export_no_text(root):
 
 
 def t_banned_scan(root):
-    """整个 Skill 目录不许出现禁用词。"""
+    """整个 Skill 目录不许出现禁用词；顺带把引擎自测也跑一遍。"""
     hits = banned_words.scan_dir(SKILL_DIR)
     check(hits == [], "rubric-grader/ 不应含禁用词，实际：\n%s" % "\n".join(hits))
+
+    proc = subprocess.run([PY, os.path.join(HERE, "anchor.py"), "selftest"],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    eout = proc.stdout.decode("utf-8", "replace")
+    check(proc.returncode == 0, "引擎自测应退出 0，rc=%d\n%s" % (proc.returncode, eout))
 
 
 SELFTESTS = (
