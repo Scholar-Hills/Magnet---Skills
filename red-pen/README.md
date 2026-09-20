@@ -16,12 +16,13 @@
 
 ## 安装
 
+**先拿到目录。** 在小红书笔记下方的 RED Skill 组件里下载压缩包并解压。找到其中含有 `SKILL.md`、`scripts/`、`references/` 与 `examples/` 的 `red-pen` 文件夹，在它的上一级目录打开终端，让下面的 `./red-pen` 指向这份完整目录，再按平台安装。
+
 **Claude Code**
 
 ```bash
 mkdir -p ~/.claude/skills
-git clone https://github.com/<org>/<repo>.git /tmp/red-pen-src
-cp -R /tmp/red-pen-src/red-pen ~/.claude/skills/red-pen
+cp -R ./red-pen ~/.claude/skills/
 ```
 
 装完的样子是 `~/.claude/skills/red-pen/SKILL.md`。只想给某个项目用，就换成该项目下的 `.claude/skills/red-pen/`（同样要有 `red-pen` 这一层）。重开一个会话，输入 `/skills` 能看到 `red-pen` 就是装好了；然后丢一段稿子过去说「帮我看看」。
@@ -29,19 +30,28 @@ cp -R /tmp/red-pen-src/red-pen ~/.claude/skills/red-pen
 **WorkBuddy（腾讯）**
 
 ```bash
-git clone https://github.com/<org>/<repo>.git /tmp/red-pen-src
-cp -R /tmp/red-pen-src/red-pen ~/.workbuddy-ai/skills/red-pen
+mkdir -p ~/.workbuddy-ai/skills
+cp -R ./red-pen ~/.workbuddy-ai/skills/
 ```
 
 WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数据目录是 `~/.workbuddy/`，就放到 `~/.workbuddy/skills/red-pen`。装完在对话框输入 `/skills`，列表里有 `red-pen` 即可。
 
 **用之前先选一个固定工作区**（输入框下方「Select Workspace」→ Open Local Folder，选一个专门放稿子的文件夹）。不选的话 WorkBuddy 会给每个任务新建一个 `~/WorkBuddy AI/<时间戳>/` 目录，同一篇稿子的历轮批注会散落在不同目录里，`stats` 就比不出「上一版的哪几条这次消失了」。
 
+已经散了就跑 `python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py doctor --scan` 查看线索；如果提示没有安全可扫的目录，就在 `--scan` 后加上你确认要扫描的目录。它只报告位置，不会搬动稿子或合并历史。
+
 **其他 Agent**（OpenClaw、Codex 等）：把 `red-pen` 目录放进各自的技能目录或工作区（OpenClaw 为 `~/.openclaw/workspace/skills/`），让 Agent 先读 `SKILL.md`。
 
-**（从小红书来的读者）** 笔记下方的 RED Skill 组件里可以一键复制安装口令，直接发给你的 Agent 即可，不用手动 clone。
+代码仓库目前还没有公开，暂不提供仓库克隆地址；开放之后会补上。有问题先在小红书笔记下留言。
 
-本机需要 `python3`（3.8+），没有别的依赖。运行 `python3 scripts/redpen.py doctor` 查看。它需要在你机器上运行 `python3` 来锚定批注，第一次会请求授权。
+本机需要 `python3`（3.8+），没有别的依赖。在选好的工作区打开终端，按安装平台运行下面对应的一行，检查环境并核对工作区位置：
+
+```bash
+python3 ~/.claude/skills/red-pen/scripts/redpen.py doctor
+python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py doctor
+```
+
+它需要在你机器上运行 `python3` 来锚定批注，第一次会请求授权。
 
 ## 用法
 
@@ -59,16 +69,26 @@ WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数�
 
 想自己敲命令也可以（`--root` 写在子命令前面或后面都认，建议只给一次；前后各给一次时，按当前目录转成绝对路径后相同才接受，不同则退出 2）：
 
+在选好的工作区运行。下面以 Claude Code 的安装路径为例；WorkBuddy 用户把 `~/.claude/skills/red-pen/` 换成 `~/.workbuddy-ai/skills/red-pen/`，其他安装位置也相应替换。先准备自己的 `稿子.md` 和 `brief.json`，brief 与批注的 JSON 格式见 [工作区契约](references/workspace-format.md)。这些是分步命令：拿到 `context` 输出后，须按它写好 `drafts/newsletter-01/inbox/marks.json`，再跑 `review`。
+
 ```bash
-python3 scripts/redpen.py init newsletter-01 --from 稿子.md   # 收稿；同名再跑一次算新版本
-python3 scripts/redpen.py brief set newsletter-01 --from brief.json
-python3 scripts/redpen.py context newsletter-01               # 上下文包，Agent 照着它写批注
-python3 scripts/redpen.py review newsletter-01                # 过闸 → 锚定 → 红笔页
-python3 scripts/redpen.py stats newsletter-01                 # 与上一版对比
-python3 scripts/redpen.py check newsletter-01                 # 离线复核整个工作区
+python3 ~/.claude/skills/red-pen/scripts/redpen.py doctor       # 查看环境与工作区
+python3 ~/.claude/skills/red-pen/scripts/redpen.py init newsletter-01 --from 稿子.md   # 同名稿正文或目标后缀改变才升版；两者都相同不升版；稿子贴在对话里时用 --from - 从标准输入收
+python3 ~/.claude/skills/red-pen/scripts/redpen.py brief set newsletter-01 --from brief.json
+python3 ~/.claude/skills/red-pen/scripts/redpen.py context newsletter-01   # 上下文包，Agent 照着它写批注
+# 先写好 inbox/marks.json，再运行下面几条。
+python3 ~/.claude/skills/red-pen/scripts/redpen.py review newsletter-01    # 过闸 → 锚定 → 红笔页
+python3 ~/.claude/skills/red-pen/scripts/redpen.py stats newsletter-01     # 与上一版对比
+python3 ~/.claude/skills/red-pen/scripts/redpen.py check newsletter-01     # 离线复核整个工作区
+python3 ~/.claude/skills/red-pen/scripts/redpen.py export newsletter-01    # 只导出计数与哈希
 ```
 
-产物在 `drafts/<slug>/`：`review.html` 是可以截图的红笔稿，`marks.json` 是过闸之后的批注记录，`history/` 里存着每一版的稿子与每一轮的批注。`examples/drafts/newsletter-01/` 是一个跑通的示例，可以直接 `check` 试手。
+产物在 `drafts/<slug>/`：`review.html` 是可以截图的红笔稿，`marks.json` 是过闸之后的批注记录，`history/` 里存着每一版的稿子与每一轮的批注。`examples/drafts/newsletter-01/` 是一个跑通的示例，按安装平台选下面对应的一行就能离线复核试手：
+
+```bash
+python3 ~/.claude/skills/red-pen/scripts/redpen.py check ~/.claude/skills/red-pen/examples/drafts/newsletter-01
+python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py check ~/.workbuddy-ai/skills/red-pen/examples/drafts/newsletter-01
+```
 
 ## 边界
 
@@ -87,4 +107,4 @@ python3 scripts/redpen.py check newsletter-01                 # 离线复核整�
 
 ## 许可与维护
 
-MIT。由学霸山丘技术团队维护。问题与建议请提 issue。
+MIT。由学霸山丘技术团队维护。问题与建议请在小红书笔记下留言；仓库公开后会补上 issue 入口。
