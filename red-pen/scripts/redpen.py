@@ -41,6 +41,7 @@ QUOTE_MAX = 200               # 单条引文字数上限（unit_len 口径）
 QUOTE_MAX_CHARS = 400         # 单条引文原串字符硬顶（字数闸之外再兜一道）
 NOTE_MIN = 6                  # 单条批语字数下限（unit_len 口径）
 MIN_ANCHORED = 0.7            # 锚定率门槛
+LOOK_ALIKE = 0.6              # 批语相似度提醒，沿用家族门槛，不拦
 FIX_MAX_RATIO = 3             # 单条 fix 相对引文的长度上限倍数
 FIX_MIN_UNITS = 20            # 单条 fix 预算的地板：短引文也要写得完一句话
 FIX_MAX_UNITS = 40            # 单条 fix 预算的天花板：限制长建议，不能替代不代笔的纪律
@@ -303,26 +304,33 @@ def _is_cjk(ch):
     return False
 
 
-def unit_len(s):
-    """字数：汉字假名谚文逐字计，连着的字母数字算一个单位，标点与空白不计。
+def _units(s):
+    """汉字假名谚文逐字成词，连着的字母数字成词，标点与空白丢掉。
 
-    CJK 那一支必须排在 isalnum() 之前 —— 汉字的 isalnum() 也为真，反过来写会把
-    一串汉字算成一个单位。CJK 字符本身也断开连写，「三栏abc」是 3 + 1 个单位。
-    这把尺对规范化不敏感：折叠空白、归一引号都不改变数出来的值。
+    CJK 那一支必须排在 isalnum() 之前，CJK 字符本身也断开字母数字连写。
+    保留词的原样大小写，字数与批语相似度只用这一套切法。
     """
-    units = 0
-    run = False                              # 上一个字符是不是字母数字连写的一部分
+    units = []
+    run = []
     for ch in s:
         if _is_cjk(ch):
-            units += 1
-            run = False
+            if run:
+                units.append("".join(run))
+                run = []
+            units.append(ch)
         elif ch.isalnum():
-            if not run:
-                units += 1
-            run = True
-        else:
-            run = False
+            run.append(ch)
+        elif run:
+            units.append("".join(run))
+            run = []
+    if run:
+        units.append("".join(run))
     return units
+
+
+def unit_len(s):
+    """统一字数口径：分词后数单位，折叠空白、归一引号都不改变长度。"""
+    return len(_units(s))
 
 
 def fix_budget(quote_units):
@@ -669,6 +677,25 @@ def _gate_duplicate(marks):
     return errors
 
 
+def warn_look_alike(marks):
+    """相似批语只提醒；规范化后完全相同仍由重复闸拒收。"""
+    warnings = []
+    tokens = [set(_units(m.get("note") or "")) for m in marks]
+    for i, left in enumerate(tokens):
+        for j in range(i + 1, len(tokens)):
+            right = tokens[j]
+            union = left | right
+            if not union:
+                continue
+            ratio = len(left & right) / len(union)
+            if ratio >= LOOK_ALIKE:
+                warnings.append(
+                    "提交的第 %d 条与第 %d 条的批语很像（相似度 %s，门槛 %s）："
+                    "确认不是套模板；真的是同一个毛病，就合成一条并在批语里说清它在下面还犯了一次。"
+                    % (i + 1, j + 1, _pct(ratio), _pct(LOOK_ALIKE)))
+    return warnings
+
+
 def _gate_no_rewrite(draft_text, marks):
     total = sum(unit_len(m["fix"]) for m in marks if m.get("fix"))
     draft_units = unit_len(draft_text)
@@ -709,6 +736,7 @@ def validate_marks(draft_text, brief, payload):
         errors.extend(item_errors)
         marks.append(tidy)
     errors.extend(_gate_duplicate(marks))
+    warnings.extend(warn_look_alike(marks))
     errors.extend(_gate_no_rewrite(draft_text, marks))
     return errors, warnings, {"context_hash": str(payload.get("context_hash") or ""), "marks": marks}
 

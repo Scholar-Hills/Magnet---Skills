@@ -562,10 +562,13 @@ def t_partial_visible():
     )
     partial = ("The opportunity cost of choosing something entirely different.",
                "Every careful reader needs an entirely different explanation.")
+    notes = ("机会成本的解释需要加一个生活实例。",
+             "报名日期最好写明星期与具体时刻。",
+             "结尾没有交代负责人的联系方式。")
     root = workspace(text="\n\n".join(exact))
     for count in (1, 0, 2):
         marks = [{"quote": partial[i] if i < count else q,
-                  "note": "请补充第%s处的具体说明" % i} for i, q in enumerate(exact)]
+                  "note": notes[i]} for i, q in enumerate(exact)]
         rc, out, err = submit(root, marks)
         check(rc == 0, "头尾锚定只提醒不拒收：\n%s%s" % (out, err))
         check(("只对上头尾" in out) == bool(count), "头尾锚定提示须按实际条数出现：\n%s" % out)
@@ -573,6 +576,51 @@ def t_partial_visible():
         rc, out, err = run(root, "export", SLUG)
         check(rc == 0 and json.loads(out).get("partial_count") == count,
               "export 应精确统计 partial_count：\n%s%s" % (out, err))
+
+
+def t_look_alike_warn():
+    """近似批语只提醒；分词与字数共用口径，完全重复仍由原闸拒收。"""
+    root = workspace()
+    rc, out, err = submit(root, marks_ok())
+    check(rc == 0 and "批语很像" not in out,
+          "原有具体批语应通过且不报相似：\n%s%s" % (out, err))
+
+    marks = marks_ok()
+    marks[0]["note"] = "这句缺少具体依据，读者无法核对结论。"
+    marks[1]["note"] = "这段缺少具体依据，读者无法核对结论。"
+    rc, out, err = submit(root, marks)
+    check(rc == 0, "近似批语只提醒、不拦：\n%s%s" % (out, err))
+    check("[WARN] 提交的第 1 条与第 2 条的批语很像" in out,
+          "应点名两条相似批语的提交序：\n%s" % out)
+    check("批语很像" not in read(os.path.join(ws_dir(root), "review.html")),
+          "相似提示只在终端，不上红笔页")
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0 and "批语很像" in out,
+          "离线复核须经同一提醒通道且仍通过：\n%s%s" % (out, err))
+
+    cases = (
+        ("", []), ("，—！？ \n\t", []),
+        ("汉字abc123カナ한글", ["汉", "字", "abc123", "カ", "ナ", "한", "글"]),
+        ("Hi Dana, ＡＢ１２ café42—x_y", ["Hi", "Dana", "ＡＢ１２", "café42", "x", "y"]),
+    )
+    for text, want in cases:
+        check(redpen._units(text) == want, "分词结果不符：%r" % text)
+        check(redpen.unit_len(text) == len(want), "抽取分词不可改变字数：%r" % text)
+    for lo, hi in redpen._CJK_RANGES:
+        text = "abc" + chr(lo) + chr(hi) + "42"
+        check(redpen._units(text) == ["abc", chr(lo), chr(hi), "42"]
+              and redpen.unit_len(text) == 4, "CJK 区间端点必须逐字且断开连写")
+    check(redpen.LOOK_ALIKE == 0.6, "沿用的相似度门槛应为 0.6")
+    at_edge = [{"note": "a b c d"}, {"note": "a b c e"}]
+    warnings = redpen.warn_look_alike(at_edge)
+    check(len(warnings) == 1 and "相似度 60%，门槛 60%" in warnings[0],
+          "Jaccard 等于门槛也须提醒：%r" % warnings)
+    check(redpen.warn_look_alike([{"note": "a b c d"}, {"note": "a b e f"}]) == [],
+          "低于门槛不可提醒")
+    check(redpen.warn_look_alike([{"note": "！！"}, {"note": "？？"}]) == [],
+          "空并集应跳过，不可除零")
+    check(redpen.warn_look_alike([{"note": "A B C"}, {"note": "a b c"}]) == [],
+          "分词保留大小写，不另加大小写折叠")
 
 
 def t_duplicate():
@@ -1817,6 +1865,7 @@ SELFTESTS = (
     t_review_lists_unanchored,
     t_partial_visible,
     t_duplicate,
+    t_look_alike_warn,
     t_coverage_warn,
     t_no_rewrite,
     t_history_append_only,
