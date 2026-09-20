@@ -508,9 +508,71 @@ def t_anchor_ratio():
     check("0.6" in out or "60" in out, "应当报出实际锚定率：\n%s" % out)
     check("这句话稿子里根本没有出现过" in out and "另外一句同样不存在的引文" in out,
           "应当逐条列出未锚定的引文：\n%s" % out)
-    check("重抄" not in out, "条数够多时不该再补那句指路提示（反例见 t_few_marks_hint）：\n%s" % out)
+    check("不必删条凑比例" not in out, "条数够多时不该再补那句指路提示（反例见 t_few_marks_hint）：\n%s" % out)
     check(not os.path.exists(os.path.join(ws_dir(root), "review.html")),
           "闸门没过时不应写出 review.html")
+
+    root = workspace(text="甲段开头接着甲段结尾\n\n乙段全文\n\n丙段全文\n\n丁段全文")
+    marks = [{"quote": q, "note": "请核对第%s处的表达依据" % i}
+             for i, q in enumerate(("甲段开头接着甲段结尾", "乙段全文\n丙段全文",
+                                    "甲段结尾", "完全不存在的话"), 1)]
+    rc, out, err = submit(root, marks)
+    check(rc == 1, "跨块、重叠和缺失合计应拒收：\n%s%s" % (out, err))
+    reasons = (
+        "这一句在稿子里逐字都有，但它横跨了两块（段落 / 列表项 / 表格行 / 标题之间）；脚本不做跨块锚定，只引其中一块",
+        "与别的批注重叠，脚本留了起点靠前的那条（同起点取长）；引文本身没问题，把这两条合成一条，或改引另一句",
+        "稿子里找不到这一句；回 draft_text 一字不差地重抄",
+    )
+    for i, reason in enumerate(reasons, 2):
+        check(out.count(reason) == 1, "每条未定位原因应只出现一次：\n%s" % out)
+        check("提交的第 %d 条 → 红笔页第 %d 条（%s）" % (i, i, reason) in out,
+              "原因必须对应真实的提交序和页面序：\n%s" % out)
+    check(out.index("锚定率") < out.index("其中 1 条") < out.index("提交的第 2 条"),
+          "报错应先给锚定率、重叠摘要，再逐条列原因：\n%s" % out)
+    for mark, quote in zip(marks, ("甲段开头", "乙段全文", "丙段全文", "丁段全文")):
+        mark["quote"] = quote
+    rc, out, err = submit(root, marks)
+    check(rc == 0 and "横跨" not in out, "换成同块真引文应通过且不报跨块：\n%s%s" % (out, err))
+
+
+def t_review_lists_unanchored():
+    """成功也逐条展示未定位原文，并对照提交序与页面序。"""
+    root = workspace(text="第一段原句\n\n第二段原句\n\n第三段原句\n\n最后一段原句")
+    marks = [{"quote": q, "note": "请说明第%s处的具体依据" % i}
+             for i, q in enumerate(("最后一段原句", "第二段原句", "第一段原句", "稿里没有这句话"), 1)]
+    rc, out, err = submit(root, marks)
+    check(rc == 0, "四条里三条锚定应通过：\n%s%s" % (out, err))
+    check(marks[3]["quote"] in out and marks[3]["note"] in out and "提交的第 4 条" in out,
+          "成功时也必须完整列出未定位条目的引文、批语、提交序：\n%s" % out)
+    mapping = [line for line in out.splitlines() if "红笔页编号 ← inbox 提交序：" in line]
+    check(len(mapping) == 1 and "1←3" in mapping[0] and "3←1" in mapping[0],
+          "重排后必须在同一行打印编号对照：\n%s" % out)
+    marks = [marks[2], marks[1], marks[0]]
+    rc, out, err = submit(workspace(text="第一段原句\n\n第二段原句\n\n第三段原句\n\n最后一段原句"), marks)
+    check(rc == 0 and "没能定位" not in out and "←" not in out,
+          "全精确命中且顺序一致时不应打印未定位或对照行：\n%s%s" % (out, err))
+
+
+def t_partial_visible():
+    """头尾锚定有明示、计数与严格大于三分之一的 WARN，但不会拒收。"""
+    exact = (
+        "The opportunity cost of choosing option A is the value of the next best alternative.",
+        "Every careful reader needs the final date before deciding whether to join this meeting.",
+        "末段交代后续安排。",
+    )
+    partial = ("The opportunity cost of choosing something entirely different.",
+               "Every careful reader needs an entirely different explanation.")
+    root = workspace(text="\n\n".join(exact))
+    for count in (1, 0, 2):
+        marks = [{"quote": partial[i] if i < count else q,
+                  "note": "请补充第%s处的具体说明" % i} for i, q in enumerate(exact)]
+        rc, out, err = submit(root, marks)
+        check(rc == 0, "头尾锚定只提醒不拒收：\n%s%s" % (out, err))
+        check(("只对上头尾" in out) == bool(count), "头尾锚定提示须按实际条数出现：\n%s" % out)
+        check(("[WARN]" in out) == (count > 1), "仅超过三分之一才应 WARN：\n%s" % out)
+        rc, out, err = run(root, "export", SLUG)
+        check(rc == 0 and json.loads(out).get("partial_count") == count,
+              "export 应精确统计 partial_count：\n%s%s" % (out, err))
 
 
 def t_duplicate():
@@ -659,6 +721,7 @@ def t_check_examples():
         rc, out, err = run(SKILL_DIR, "check", d)
         check(rc == 0, "示例 %s 应当 0 ERROR，rc=%d\n%s%s" % (os.path.basename(d), rc, out, err))
         check("[ERROR]" not in out, "示例 %s 不该有 ERROR：\n%s" % (os.path.basename(d), out))
+        check("0 ERROR / 0 WARN" in out, "示例也必须保持 0 WARN：\n%s" % out)
 
 
 def t_check_tamper():
@@ -720,8 +783,9 @@ def t_export_no_text():
     check(rc == 0, "export 应退出 0，rc=%d\n%s%s" % (rc, out, err))
     pack = json.loads(out)
     check(sorted(pack) == ["anchored_ratio", "context_hash", "level_counts",
-                           "marks_count", "slug", "versions"],
-          "导出件的键应当固定为六个，实际 %r" % sorted(pack))
+                           "marks_count", "partial_count", "slug", "versions"],
+          "导出件的键应当固定为七个，实际 %r" % sorted(pack))
+    check(pack["partial_count"] == 0, "精确命中的导出件应当没有头尾锚定：%r" % pack)
     check(pack["marks_count"] == 5 and pack["versions"] == 1, "计数应当对上：%r" % pack)
     check(pack["level_counts"] == {"major": 1, "minor": 2, "remark": 2},
           "等级分布应当对上：%r" % pack["level_counts"])
@@ -909,7 +973,7 @@ def t_few_marks_hint():
 
     三条里锚上两条（2/3 = 0.67 低于 0.7），改前报的是「请照原文一字不差地重引」，
     里面没有「重抄」二字 —— 这颗牙今天红在关键词那一行。这句提示按条数触发，条数够
-    多时不打，反例是现成的 t_anchor_ratio（5 条里锚不上 2 条，那份输出里不许出现「重抄」）。
+    多时不打，反例是现成的 t_anchor_ratio（5 条里锚不上 2 条，不许出现「不必删条凑比例」）。
     """
     root = workspace()
     marks = marks_ok()[:2] + [
@@ -917,7 +981,7 @@ def t_few_marks_hint():
     ]
     rc, out, err = submit(root, marks)
     check(rc == 1, "锚定率 0.67 应退出 1，rc=%d\n%s%s" % (rc, out, err))
-    check("重抄" in out, "条数少时应当补一句回原文重抄：\n%s" % out)
+    check("不必删条凑比例" in out, "条数少时应当保留独有的指路提示：\n%s" % out)
 
 
 def t_init_units_line():
@@ -1680,6 +1744,8 @@ SELFTESTS = (
     t_marks_count_bounds,
     t_fix_rules,
     t_anchor_ratio,
+    t_review_lists_unanchored,
+    t_partial_visible,
     t_duplicate,
     t_coverage_warn,
     t_no_rewrite,

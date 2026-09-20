@@ -604,15 +604,15 @@ def _gate_count(items):
 
 def _gate_fix(idx, quote, fix):
     if not fix.strip():
-        return ["第 %d 条的 fix 是空串：要么写清怎么改，要么把这个键去掉。" % idx]
+        return ["提交的第 %d 条的 fix 是空串：要么写清怎么改，要么把这个键去掉。" % idx]
     errors = []
     bare_quote, bare_fix = anchor.normalize(quote), anchor.normalize(fix)
     if bare_fix == bare_quote:
-        errors.append("第 %d 条的 fix 与引文规范化后完全相同，那不是改法。" % idx)
+        errors.append("提交的第 %d 条的 fix 与引文规范化后完全相同，那不是改法。" % idx)
     q_units, f_units = unit_len(bare_quote), unit_len(bare_fix)
     budget = fix_budget(q_units)
     if bare_quote and f_units > budget:
-        errors.append("第 %d 条的 fix 有 %d 字，超过预算 %d 字（引文 %d 字 × %d，最少 %d 字、最多 %d 字）："
+        errors.append("提交的第 %d 条的 fix 有 %d 字，超过预算 %d 字（引文 %d 字 × %d，最少 %d 字、最多 %d 字）："
                       "给方向就够，整段重写不是批注。"
                       % (idx, f_units, budget, q_units, FIX_MAX_RATIO, FIX_MIN_UNITS, FIX_MAX_UNITS))
     return errors
@@ -622,24 +622,24 @@ def _gate_one(idx, item):
     """单条批注的形状闸；总是返回一条清洗过的记录，好让后面的编号对得上。"""
     tidy = {"quote": "", "level": anchor.DEFAULT_LEVEL, "note": ""}
     if not isinstance(item, dict):
-        return ["第 %d 条不是一个 JSON 对象。" % idx], tidy
+        return ["提交的第 %d 条不是一个 JSON 对象。" % idx], tidy
     errors = []
     unknown = sorted(k for k in item if k not in MARK_KEYS)
     if unknown:
-        errors.append("第 %d 条多了不认识的键：%s；只认 %s。"
+        errors.append("提交的第 %d 条多了不认识的键：%s；只认 %s。"
                       % (idx, "、".join(_metadata(key) for key in unknown), "、".join(MARK_KEYS)))
     quote = str(item.get("quote") or "").strip()
     note = str(item.get("note") or "").strip()
     if not quote:
-        errors.append("第 %d 条的引文是空的：批注必须指向原文里的某一句。" % idx)
+        errors.append("提交的第 %d 条的引文是空的：批注必须指向原文里的某一句。" % idx)
     elif unit_len(quote) > QUOTE_MAX:
-        errors.append("第 %d 条的引文有 %d 字，超过 %d 字上限：引一句就够，不要整段抄。"
+        errors.append("提交的第 %d 条的引文有 %d 字，超过 %d 字上限：引一句就够，不要整段抄。"
                       % (idx, unit_len(quote), QUOTE_MAX))
     elif len(quote) > QUOTE_MAX_CHARS:
-        errors.append("第 %d 条的引文有 %d 个字符，超过 %d 字符硬顶：引一句就够，不要整段抄。"
+        errors.append("提交的第 %d 条的引文有 %d 个字符，超过 %d 字符硬顶：引一句就够，不要整段抄。"
                       % (idx, len(quote), QUOTE_MAX_CHARS))
     if unit_len(note) < NOTE_MIN:
-        errors.append("第 %d 条的批语只有 %d 字，至少 %d 字才说得清问题。"
+        errors.append("提交的第 %d 条的批语只有 %d 字，至少 %d 字才说得清问题。"
                       % (idx, unit_len(note), NOTE_MIN))
     tidy["quote"] = quote
     tidy["note"] = note
@@ -662,7 +662,7 @@ def _gate_duplicate(marks):
             if not token:
                 continue
             if token in seen:
-                errors.append("第 %d 条与第 %d 条的%s重复：%s"
+                errors.append("提交的第 %d 条与提交的第 %d 条的%s重复：%s"
                               % (seen[token], i, label, _cut(m.get(key))))
             else:
                 seen[token] = i
@@ -713,21 +713,88 @@ def validate_marks(draft_text, brief, payload):
     return errors, warnings, {"context_hash": str(payload.get("context_hash") or ""), "marks": marks}
 
 
-def gate_anchored(result):
+WHY_OVERLAP = "与别的批注重叠，脚本留了起点靠前的那条（同起点取长）；引文本身没问题，把这两条合成一条，或改引另一句"
+WHY_CROSS = "这一句在稿子里逐字都有，但它横跨了两块（段落 / 列表项 / 表格行 / 标题之间）；脚本不做跨块锚定，只引其中一块"
+WHY_MISSING = "稿子里找不到这一句；回 draft_text 一字不差地重抄"
+PARTIAL_WARN_RATIO = 1.0 / 3
+
+
+def why_missed(ex, mark):
+    """先认重叠让位，再区分跨块与真正找不到；让位的引文本身可能定位成功。"""
+    if mark.get("dropped_overlap"):
+        return WHY_OVERLAP
+    if anchor.locate_reason(ex, mark.get("quote") or "") == anchor.CROSS_BLOCK:
+        return WHY_CROSS
+    return WHY_MISSING
+
+
+def submit_order(tidy_marks, result_marks):
+    """返回页面 id → 提交序号；只在形状与重复闸通过后调用。
+
+    这张映射靠闸门四（两条引文规范化后不许相同）才成立。闸门四一旦被放宽，
+    同一个规范化引文会对应两个提交序，编号映射会静默错位，报错就会指着错的
+    那一行让人去改。改闸门四之前先改这里。
+    """
+    by_quote = {anchor.normalize(m["quote"]): i for i, m in enumerate(tidy_marks, 1)}
+    return {m["id"]: by_quote[anchor.normalize(m["quote"])] for m in result_marks}
+
+
+def order_line(order):
+    if all(pid == submitted for pid, submitted in order.items()):
+        return None
+    return "红笔页编号 ← inbox 提交序：" + "、".join(
+        "%d←%d" % (pid, order[pid]) for pid in sorted(order))
+
+
+def missed_lines(ex, marks, order=None):
+    """未定位清单；review 带提交序，stats 只用留档中的页面序。"""
+    lines = []
+    for m in marks:
+        if m.get("anchored"):
+            continue
+        pid, why = m["id"], why_missed(ex, m)
+        if order is None:
+            lines.append("    红笔页第 %d 条（%s）" % (pid, why))
+        else:
+            lines.append("    提交的第 %d 条 → 红笔页第 %d 条（%s）" % (order[pid], pid, why))
+        lines.append("      引文：%s" % _cut(m.get("quote"), 60))
+        lines.append("      批语：%s" % _cut(m.get("note"), 60))
+    return lines
+
+
+def partial_line(marks):
+    count = sum(1 for m in marks if m.get("partial"))
+    if not count:
+        return None
+    return "其中 %d 条只对上头尾，仅供参考——这几条的引文值得回原文核一遍。" % count
+
+
+def warn_partial(result):
+    anchored = sum(1 for m in result.marks if m.get("anchored"))
+    partial = sum(1 for m in result.marks if m.get("partial"))
+    if not anchored or partial / anchored <= PARTIAL_WARN_RATIO:
+        return []
+    return ["头尾锚定的有 %d 条，占已锚定 %d 条的 %s，超过三分之一：这几条的引文回原文重抄一遍更稳。"
+            % (partial, anchored, _pct(partial / anchored))]
+
+
+def gate_anchored(ex, result, order):
     """锚定率不够就退回重批，并把钉不住的引文逐条摊开。"""
     if not result.marks or result.anchored_ratio >= MIN_ANCHORED:
         return []
-    lines = ["锚定率 %s（%d/%d）低于门槛 %s，下面这些引文没能钉回原文，请照原文一字不差地重引："
+    lines = ["锚定率 %s（%d/%d）低于门槛 %s，下面这些引文没能钉回原文，下面逐条说清是哪一种没钉住、该怎么办："
              % (_pct(result.anchored_ratio),
                 sum(1 for m in result.marks if m.get("anchored")), len(result.marks),
                 _pct(MIN_ANCHORED))]
     if len(result.marks) - 1 < MIN_ANCHORED * len(result.marks):
         lines.append("    条数少的时候一条钉不住就等于整份不过：回原文把那一条重抄一遍就行，不必删条凑比例。")
-    for m in result.marks:
-        if m.get("anchored"):
-            continue
-        why = "与别的批注重叠，脚本留了起点靠前的那条（同起点取长）" if m.get("dropped_overlap") else "稿子里找不到这一句"
-        lines.append("    第 %d 条（%s）：%s" % (m.get("id", 0), why, _cut(m.get("quote"), 60)))
+    missed = sum(1 for m in result.marks if not m.get("anchored"))
+    overlaps = sum(1 for m in result.marks if m.get("dropped_overlap"))
+    if overlaps == missed:
+        lines.append("下面这 %d 条都是与别的批注重叠被让位的，引文没写错——把重叠的两条合成一条，或改引另一句。" % overlaps)
+    elif overlaps:
+        lines.append("其中 %d 条是与别的批注重叠被让位的，那几条的引文没写错。" % overlaps)
+    lines.extend(missed_lines(ex, result.marks, order))
     return ["\n".join(lines)]
 
 
@@ -749,17 +816,17 @@ def gate_coverage(result, html, blocks):
     return ["所有引文都落在稿子前 %s 的篇幅里，看着像后半段没读完；确认过再交。" % _pct(FRONT_RATIO)]
 
 
-def warn_levels(result):
+def warn_levels(result, order):
     bad = [m for m in result.marks if m.get("level_fixed")]
     if not bad:
         return []
-    return ["第 %s 条的等级不在 %s 之内，已改判为「%s」：等级由脚本兜底，不要自己造词。"
-            % ("、".join(str(m.get("id", 0)) for m in bad), "、".join(anchor.LEVELS),
+    return ["提交的第 %s 条的等级不在 %s 之内，已改判为「%s」：等级由脚本兜底，不要自己造词。"
+            % ("、".join(str(order[m["id"]]) for m in bad), "、".join(anchor.LEVELS),
                anchor.LEVEL_LABEL[anchor.DEFAULT_LEVEL])]
 
 
 def run_gates(raw, brief, payload):
-    """六道闸门跑一遍，返回 (errors, warnings, normalized, result)。
+    """六道闸门跑一遍，返回 (errors, warnings, normalized, result, order)。
 
     review 与 check 共用这一条通道 —— 「全部闸门」只在这里定义一次，两边不会走岔。
     形状闸没过就不锚定：拿一份自己都不认的批注去 splice 原文没有意义。
@@ -767,12 +834,15 @@ def run_gates(raw, brief, payload):
     ex = anchor.extract(raw)
     errors, warnings, tidy = validate_marks(ex.text, brief, payload)
     result = None
+    order = {}
     if not errors:
         result = anchor.annotate(raw, tidy["marks"])
-        errors.extend(gate_anchored(result))
+        order = submit_order(tidy["marks"], result.marks)
+        errors.extend(gate_anchored(ex, result, order))
         warnings.extend(gate_coverage(result, ex.html, len(anchor.blocks(ex))))
-        warnings.extend(warn_levels(result))
-    return errors, warnings, tidy, result
+        warnings.extend(warn_levels(result, order))
+        warnings.extend(warn_partial(result))
+    return errors, warnings, tidy, result, order
 
 
 def level_counts(marks):
@@ -975,7 +1045,7 @@ def cmd_review(args):
     if not os.path.isfile(box):
         raise UsageError("还没有待审的批注：先跑 context %s 拿上下文包，把批注写进 %s，再 review。"
                          % (slug, _shown(box)))
-    errors, warnings, tidy, result = run_gates(raw, brief, read_json(box))
+    errors, warnings, tidy, result, order = run_gates(raw, brief, read_json(box))
     for line in errors:
         print("[ERROR] %s" % line)
     for line in warnings:
@@ -998,9 +1068,14 @@ def cmd_review(args):
     print(level_line(record["level_counts"]))
     print("写出：%s · %s" % (_shown(record_path(ws)), _shown(os.path.join(ws, PAGE_NAME))))
     print("留档：%s" % _shown(snapshot))
+    for line in (partial_line(result.marks), order_line(order)):
+        if line is not None:
+            print(line)
     missed = [m for m in result.marks if not m.get("anchored")]
     if missed:
-        print("有 %d 条没能定位，红笔页里单列一节 —— 脚本不擅自摆放，请人工看。" % len(missed))
+        print("有 %d 条没能定位，红笔页里单列一节 —— 脚本不擅自摆放，请把下面这几行原样念给用户。" % len(missed))
+        for line in missed_lines(anchor.extract(raw), result.marks, order):
+            print(line)
     return 0
 
 
@@ -1079,7 +1154,7 @@ def cmd_check(args):
 
     payload = {"context_hash": record.get("context_hash"),
                "marks": [dict((k, m[k]) for k in MARK_KEYS if k in m) for m in marks]}
-    again, more_warns, _tidy, result = run_gates(raw, brief, payload)
+    again, more_warns, _tidy, result, _order = run_gates(raw, brief, payload)
     errors.extend(again)
     warns.extend(more_warns)
     if result is not None:
@@ -1120,6 +1195,7 @@ def cmd_export(args):
         "slug": slug,
         "versions": record.get("version") or version_of(ws),
         "marks_count": len(marks),
+        "partial_count": sum(1 for m in marks if m.get("partial")),
         "anchored_ratio": record.get("anchored_ratio") or 0.0,
         "level_counts": record.get("level_counts") or level_counts(marks),
         "context_hash": record.get("context_hash") or "",
