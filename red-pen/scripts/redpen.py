@@ -74,22 +74,133 @@ WORD_MAIN = "word/document.xml"
 MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
 
 
+# ---- 原稿准入与解码；JSON 载荷不消费这组编码兜底
+# UTF-32 的 BOM 以 UTF-16 的 BOM 开头，必须先匹配长标记。
+BOMS = ((b"\xff\xfe\x00\x00", "utf-32"), (b"\x00\x00\xfe\xff", "utf-32"),
+        (b"\xef\xbb\xbf", "utf-8-sig"), (b"\xff\xfe", "utf-16"), (b"\xfe\xff", "utf-16"))
+UTF8_ENCS = ("utf-8-sig", "utf-8")
+FALLBACK_ENC = "gb18030"
+TEXT_EXTS = (".txt", ".md", ".markdown", ".html", ".htm")
+DOCX_EXT = ".docx"
+SNIFF_BYTES = 8192
+REFUSE_EXTS = {
+    ".pdf": "PDF 读不了。在阅读器里全选复制、粘成 .txt，或用 Word 打开另存为 .docx 再来。",
+    ".doc": "旧版 Word .doc 读不了。请用 Word 另存为 .docx 或 .txt。",
+    ".rtf": "RTF 读不了。请用文字处理软件另存为 .docx 或 .txt。",
+    ".odt": "ODT 读不了。请用文字处理软件另存为 .docx 或 .txt。",
+    ".pages": "Pages 文稿读不了。请在 Pages 中导出为 .docx 或 .txt。",
+    ".epub": "EPUB 读不了。请在阅读器里复制所需正文，粘成 .txt。",
+}
+for _ext in (".xlsx", ".xls", ".csv", ".numbers"):
+    REFUSE_EXTS[_ext] = "表格文件读不了。请把要批的单元格文字复制出来，粘成 .txt。"
+for _ext in (".pptx", ".ppt", ".key"):
+    REFUSE_EXTS[_ext] = "演示文件读不了。请把要批的文字复制出来，粘成 .txt。"
+for _ext in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".svg", ".heic", ".ico"):
+    REFUSE_EXTS[_ext] = "图片读不了。请先用文字识别工具提取文字，核对后存成 .txt。"
+for _ext in (".zip", ".rar", ".7z", ".gz", ".gzip", ".tar", ".bz2", ".xz", ".tgz"):
+    REFUSE_EXTS[_ext] = "压缩包读不了。请先解压，再交里面的 .txt、.md、.html 或 .docx 稿子。"
+BINARY_MAGIC = (
+    (b"%PDF-", REFUSE_EXTS[".pdf"]), (b"{\\rtf", REFUSE_EXTS[".rtf"]),
+    (b"PK\x03\x04", REFUSE_EXTS[".zip"]), (b"\xd0\xcf\x11\xe0", REFUSE_EXTS[".doc"]),
+    (b"\x89PNG", REFUSE_EXTS[".png"]), (b"\xff\xd8\xff", REFUSE_EXTS[".jpg"]),
+    (b"GIF8", REFUSE_EXTS[".gif"]),
+    (b"%!PS", "PostScript 读不了。请从原文档复制正文，存成 .txt。"),
+    (b"\x1f\x8b", REFUSE_EXTS[".gz"]),
+    (b"\x7fELF", "这是程序文件，读不了。请交 .txt、.md、.html 或 .docx 稿子。"),
+)
+WORD_TBL = WORD_NS + "tbl"
+WORD_TR = WORD_NS + "tr"
+WORD_TXBX = WORD_NS + "txbxContent"
+WORD_PICT = tuple(WORD_NS + tag for tag in ("drawing", "pict", "object"))
+WORD_TRACK = tuple(WORD_NS + tag for tag in ("ins", "del"))
+CELL_SEP = "\t"
+DOCX_LINES = {
+    "word": "这是 Word 稿：我只读得到文字，抽成纯文本存进了工作区。",
+    "table": "表格按行读出来了，同一行的单元格用制表符相连，整行可以整句引；行与行之间是块边界，跨行引不了。",
+    "textbox": "文本框里的字读到了，按它在正文里的位置读一次，不重复。",
+    "picture": "图片里的字读不到（脚本不做文字识别），图本身不进稿子；普通文字段落里的图注仍会读到。",
+    "track": "读到的是正文里的文字节点（通常包括插入文字，不含删除文字节点）；修订痕迹与 Word 批注读不到，也不替你接受或拒绝修订。",
+}
+
+
 class UsageError(Exception):
     """用法或输入格式错误，退出码 2。"""
 
 
 # ---------------------------------------------------------------- 小工具
 
-def read_text(path):
+def read_bytes(path):
     try:
-        with open(path, "r", encoding="utf-8-sig") as f:
+        with open(path, "rb") as f:
             return f.read()
     except FileNotFoundError:
         raise UsageError("找不到文件：%s" % _shown(path))
     except IsADirectoryError:
         raise UsageError("这是一个目录而不是文件：%s" % _shown(path))
+
+
+def read_text(path):
+    """工作区与 JSON 只读严格 UTF-8，兼容 UTF-8 BOM；不猜旧编码。"""
+    try:
+        return read_bytes(path).decode(UTF8_ENCS[0]).replace("\r\n", "\n").replace("\r", "\n")
     except UnicodeDecodeError as e:
         raise UsageError("文件不是 UTF-8 编码：%s（%s）" % (_shown(path), e))
+
+
+def _bom_of(raw):
+    return next((encoding for bom, encoding in BOMS if raw.startswith(bom)), None)
+
+
+def decode_bytes(raw, shown):
+    """仅供原稿使用，返回（统一换行的正文，BOM 编码／utf-8／gb18030）。"""
+    encoding = _bom_of(raw)
+    try:
+        if encoding:
+            text = raw.decode(encoding)
+        else:
+            try:
+                text = raw.decode(UTF8_ENCS[1])
+                encoding = UTF8_ENCS[1]
+            except UnicodeDecodeError:
+                encoding = FALLBACK_ENC
+                text = raw.decode(encoding)
+    except UnicodeDecodeError:
+        raise UsageError("编码读不出：%s。按文件头字节序标记或 UTF-8、GB18030 都未能读出正文；"
+                         "若其实是 Word / PDF / 图片，先按它自己的格式导出。" % shown)
+    return text.replace("\r\n", "\n").replace("\r", "\n"), encoding
+
+
+def _refuse_by_content(raw):
+    for magic, reason in BINARY_MAGIC:
+        if raw.startswith(magic):
+            raise UsageError(reason)
+    # BOM 必须先于 NUL 判定：UTF-16／UTF-32 正文本来就会含零字节。
+    if _bom_of(raw) not in ("utf-16", "utf-32") and b"\x00" in raw[:SNIFF_BYTES]:
+        raise UsageError("这像是二进制文件，读不了。请按原格式导出为 .txt 或 .docx。")
+
+
+def _refuse_by_ext(ext):
+    if ext in REFUSE_EXTS:
+        raise UsageError(REFUSE_EXTS[ext])
+
+
+def _keep_ext(ext):
+    if ext in (".html", ".htm"):
+        return ".html"
+    if ext in (".md", ".markdown"):
+        return ".md"
+    return ".txt"
+
+
+def admit(path, raw):
+    """内容先拒收，后缀再拒收；其余文本返回（目标后缀，提示行列表）。"""
+    _refuse_by_content(raw)
+    ext = os.path.splitext(path)[1].lower()
+    _refuse_by_ext(ext)
+    notes = []
+    if path != STDIN_MARK and ext not in TEXT_EXTS:
+        notes.append("这个后缀我不认得，按纯文本读的。读出来不是你的正文就换个格式再来。")
+    return _keep_ext(ext), notes
 
 
 def write_text(path, text):
@@ -339,17 +450,63 @@ def _docx_line(node, parts):
     return parts
 
 
-def docx_text(path):
-    """docx 只用 zipfile + xml：读 word/document.xml，按 w:p 切段。
+def _docx_shape(root):
+    """只报告正文 XML 实际出现的结构，不推断图片或批注内容。"""
+    tags = {node.tag for node in root.iter()}
+    shape = set()
+    for name, present in (("table", WORD_TBL in tags), ("textbox", WORD_TXBX in tags),
+                          ("picture", bool(tags.intersection(WORD_PICT))),
+                          ("track", bool(tags.intersection(WORD_TRACK)))):
+        if present:
+            shape.add(name)
+    return shape
 
-    表格按段落读出来（只丢表结构，文字一个不少）；文本框里的文字按它在正文里
-    锚着的位置读一次。图片与修订痕迹不支持。稿子的字一个不改、也一个不重复。
-    """
+
+def _docx_rows(tbl):
+    """显式按行、单元格取字：一格多段用空格，格间用制表符。"""
+    def members(node, tag):
+        # 内容控件等容器透明；一旦找到目标就停，不把嵌套表格再算成同级行／格。
+        for child in node:
+            if child.tag == MC_FALLBACK:
+                continue
+            if child.tag == tag:
+                yield child
+            elif child.tag not in (WORD_TBL, WORD_TR, WORD_NS + "tc", WORD_NS + "p"):
+                yield from members(child, tag)
+
+    for row in members(tbl, WORD_TR):
+        cells = []
+        for cell in members(row, WORD_NS + "tc"):
+            paragraphs = ["".join(_docx_line(p, [])).strip() for p in _docx_paragraphs(cell)]
+            cells.append(" ".join(p for p in paragraphs if p))
+        line = CELL_SEP.join(cells)
+        if line.strip():
+            yield line
+
+
+def _docx_blocks(root):
+    for child in root:
+        if child.tag == MC_FALLBACK:
+            continue
+        if child.tag == WORD_TBL:
+            yield from _docx_rows(child)
+        elif child.tag == WORD_NS + "p":
+            line = "".join(_docx_line(child, [])).strip()
+            if line:
+                yield line
+        else:
+            yield from _docx_blocks(child)
+
+
+def docx_text(path):
+    """返回（正文，结构集合）；表格按行成块，文本框沿用不重复抽取。"""
     try:
         with zipfile.ZipFile(path) as pack:
             raw = pack.read(WORD_MAIN)
     except FileNotFoundError:
         raise UsageError("找不到文件：%s" % _shown(path))
+    except IsADirectoryError:
+        raise UsageError("这是一个目录而不是文件：%s" % _shown(path))
     except KeyError:
         raise UsageError("这个 .docx 里没有 %s，不像是 Word 文档：%s" % (WORD_MAIN, _shown(path)))
     except zipfile.BadZipFile:
@@ -358,26 +515,28 @@ def docx_text(path):
         root = ET.fromstring(raw.decode("utf-8", "replace"))
     except ET.ParseError as e:
         raise UsageError("这个 .docx 的正文 XML 解析失败：%s（%s）" % (_shown(path), e))
-    blocks = []
-    for para in _docx_paragraphs(root):
-        line = "".join(_docx_line(para, [])).strip()
-        if line:
-            blocks.append(line)
+    blocks = list(_docx_blocks(root))
     if not blocks:
         raise UsageError("这个 .docx 里没读到文字段落（整篇都是图片的稿子读不了）：%s" % _shown(path))
-    return "\n\n".join(blocks) + "\n"
+    return "\n\n".join(blocks) + "\n", _docx_shape(root)
 
 
 def load_source(path):
-    """读一份稿子，返回 (正文, 落进工作区时该用的后缀)。"""
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".docx":
-        return docx_text(path), ".txt"
-    if ext in (".html", ".htm"):
-        return read_text(path), ".html"
-    if ext in (".md", ".markdown"):
-        return read_text(path), ".md"
-    return read_text(path), ".txt"
+    """原稿唯一入口，返回（正文，目标后缀，提示行列表）。"""
+    if os.path.splitext(path)[1].lower() == DOCX_EXT:
+        # docx 本来就是 ZIP，不能跑内容嗅探；假 docx 由 BadZipFile 兜住。
+        text, shape = docx_text(path)
+        return text, ".txt", [DOCX_LINES["word"]] + [
+            DOCX_LINES[key] for key in ("table", "textbox", "picture", "track") if key in shape]
+    raw = sys.stdin.buffer.read() if path == STDIN_MARK else read_bytes(path)
+    ext, notes = admit(path, raw)
+    text, encoding = decode_bytes(raw, _source_label(path))
+    if _bom_of(raw):
+        notes.append("按 %s 编码读取，这是文件头的字节序标记说的。" % encoding.upper())
+    elif encoding == FALLBACK_ENC:
+        notes.append("编码是猜的：按 GB18030 读出。请核对正文开头两行；这两行是乱码就先停下，别接着批。")
+        notes.extend(text.split("\n")[:2])
+    return text, ext, notes
 
 
 # ---------------------------------------------------------------- 闸门
@@ -647,7 +806,8 @@ def cmd_init(args):
     slug = check_slug(args.slug)
     root = os.path.abspath(args.root)
     ws = os.path.join(root, DRAFTS_DIR, slug)
-    text, ext = load_source(args.source)
+    text, ext, extra = load_source(args.source)
+    intake_notes = _intake_notes(args.source, ext, text, extra)
     if not text.strip():
         raise UsageError("这份稿子是空的：%s" % _shown(args.source))
     current = draft_path(ws) if os.path.isdir(ws) else None
@@ -666,6 +826,8 @@ def cmd_init(args):
         print("下一步：context %s → 写 %s → review %s。"
               % (slug, os.path.join(INBOX_DIR, MARKS_NAME), slug))
         print("确实改过稿就核对一下 --from 指的是不是新文件。")
+        for note in intake_notes:
+            print(note)
         return 0
     archived = archive_version(ws) if os.path.isdir(ws) else None
     for sub in (INBOX_DIR, HISTORY_DIR):
@@ -692,7 +854,7 @@ def cmd_init(args):
     if had_brief or args.lang:
         line += " · 批语语言 %s" % brief["lang"]
     print(line)
-    for note in _intake_notes(args.source, ext, text, []):
+    for note in intake_notes:
         print(note)
     if not brief["audience"] and not brief["purpose"]:
         print("下一步：先问清给谁看、要达到什么、最怕什么，写成 JSON 后跑 brief set %s --from <文件>；"
@@ -959,7 +1121,7 @@ def cmd_doctor(args):
     else:
         print("  [提示] 工作区根目录 %s 下还没有 %s/，init 时会建" % (_shown(root), DRAFTS_DIR))
     print("提示：脚本只读写工作区，不联网，不执行稿子里的任何代码；稿子本身一个字都不改。")
-    print("      docx 只读 %s 里的文字段落：表格按段落读出、丢表结构，文本框的文字按位置读一次；"
+    print("      docx 只读 %s 里的文字段落：表格按行读出、整行可以引，跨行引不了，文本框的文字按位置读一次；"
           "图片与修订痕迹不支持。" % WORD_MAIN)
     return worst
 
@@ -975,7 +1137,7 @@ def build_parser():
 
     i = sub.add_parser("init", help="收一份稿子建工作区；同名再跑一次算新版本")
     i.add_argument("slug")
-    i.add_argument("--from", dest="source", required=True, help="稿子文件（.md / .html / .txt / .docx）")
+    i.add_argument("--from", dest="source", required=True, help="稿子文件（.md / .html / .txt / .docx）；给 - 表示从标准输入收稿")
     i.add_argument("--lang", choices=LANGS, help="批语语言（默认 zh）")
 
     b = sub.add_parser("brief", help="写入给谁看 / 要达到什么 / 最怕什么")

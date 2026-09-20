@@ -386,6 +386,52 @@ def t_docx_table_and_textbox():
     check(rc == 1 and "锚定率" in out,
           "跨两行引文应当因锚不上拒收，rc=%d\n%s%s" % (rc, out, err))
 
+    cell_src = pack_docx(os.path.join(root, "cells.docx"),
+        "<w:tbl><w:tr><w:tc><w:p/></w:tc><w:tc>"
+        "<w:p><w:r><w:t>格内第一段</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>格内第二段</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:p><w:r><w:t>第二格</w:t></w:r></w:p></w:tc>"
+        "<w:tc><w:p/></w:tc></w:tr></w:tbl>")
+    rc, out, err = run(root, "init", "cells", "--from", cell_src)
+    check(rc == 0, "单元格多段表格应收稿，rc=%d\n%s%s" % (rc, out, err))
+    check(read(os.path.join(ws_dir(root, "cells"), "draft.txt")) ==
+          "\t格内第一段 格内第二段\t第二格\t\n",
+          "格内多段不能拆列，首尾空单元格仍保留制表符")
+
+    # 行／单元格级内容控件是透明容器；遇到目标行或格就停止向下找同级节点。
+    def para(text):
+        return "<w:p><w:r><w:t>%s</w:t></w:r></w:p>" % text
+
+    first = "<w:tc>" + para("第一格") + "</w:tc>"
+    second = "<w:tc>" + para("第二格") + "</w:tc>"
+    row = "<w:tr>" + first + second + "</w:tr>"
+    wrapped_row = "<w:sdt><w:sdtPr/><w:sdtContent>" + row + "</w:sdtContent></w:sdt>"
+    wrapped_cell = "<w:sdt><w:sdtPr/><w:sdtContent>" + first + "</w:sdtContent></w:sdt>"
+    nested = ("<w:tbl><w:tr><w:tc>" + para("内格甲") + "</w:tc><w:tc>" + para("内格乙")
+              + "</w:tc></w:tr><w:tr><w:tc>" + para("内行二") + "</w:tc></w:tr></w:tbl>")
+    cases = (
+        ("wrapped-row", "<w:tbl>" + wrapped_row + "</w:tbl>", "第一格\t第二格"),
+        ("wrapped-cell", "<w:tbl><w:tr>" + wrapped_cell + second + "</w:tr></w:tbl>",
+         "第一格\t第二格"),
+        ("nested-table", "<w:tbl><w:tr><w:tc>" + para("外格前") + nested + para("外格后")
+         + "</w:tc>" + second + "</w:tr>" + wrapped_row + "</w:tbl>",
+         "外格前 内格甲 内格乙 内行二 外格后\t第二格\n\n第一格\t第二格"),
+        ("wrapped-fallback", "<w:tbl><mc:AlternateContent><mc:Choice Requires=\"wps\">"
+         + wrapped_row + "</mc:Choice><mc:Fallback>" + wrapped_row
+         + "</mc:Fallback></mc:AlternateContent></w:tbl>", "第一格\t第二格"),
+    )
+    for slug, table, want in cases:
+        src = pack_docx(os.path.join(root, slug + ".docx"), para("普通段落") + table)
+        rc, out, err = run(root, "init", slug, "--from", src)
+        check(rc == 0, "%s 应正常收稿，rc=%d\n%s%s" % (slug, rc, out, err))
+        landed = read(os.path.join(ws_dir(root, slug), "draft.txt"))
+        expected = "普通段落\n\n" + want + "\n"
+        check(landed == expected, "%s 不能丢字、错列或重复：实际 %r，期望 %r"
+              % (slug, landed, expected))
+        if slug == "nested-table":
+            check(all(landed.count(word) == 1 for word in ("内格甲", "内格乙", "内行二")),
+                  "嵌套表格只能归所在的外层单元格，不能重复充作外层行或格")
+
 
 def t_context_hash_includes_brief():
     """brief 也进 context_hash：改了标准，旧批注就该作废。"""
@@ -1048,7 +1094,7 @@ def t_intake_encoding():
     root = tempfile.mkdtemp(prefix="red-pen-selftest-")
     _TEMPS.append(root)
     body = "第一行是合成稿件。\n第二行说明收稿编码。\n"
-    for encoding in ("utf-8", "gb18030", "gbk", "utf-16"):
+    for encoding in ("utf-8", "gb18030", "gbk", "utf-8-sig", "utf-16", "utf-32"):
         src = os.path.join(root, encoding + ".txt")
         with open(src, "wb") as f:
             f.write(body.encode(encoding))
@@ -1057,11 +1103,20 @@ def t_intake_encoding():
         check(read(os.path.join(ws_dir(root, encoding), "draft.txt")) == body,
               "%s 原稿解码后必须逐字保留" % encoding)
         if encoding in ("gb18030", "gbk"):
-            check("GB18030" in out and all(line in out for line in body.splitlines()),
+            check("GB18030" in out and "猜" in out and "停下" in out
+                  and all(line in out for line in body.splitlines()),
                   "旧编码应报告 GB18030 并回显开头两行：\n%s" % out)
-        elif encoding == "utf-16":
+            draft = os.path.join(ws_dir(root, encoding), "draft.txt")
+            before_stat = os.stat(draft)
+            rc, again, err = run(root, "init", encoding, "--from", src)
+            check(rc == 0 and "没有收成新版本" in again and "猜" in again
+                  and all(line in again for line in body.splitlines()),
+                  "原样重收也必须披露猜测并回显两行：\n%s%s" % (again, err))
+            check(os.stat(draft).st_mtime_ns == before_stat.st_mtime_ns,
+                  "原样重收编码提示不能引起写稿")
+        elif encoding in ("utf-8-sig", "utf-16", "utf-32"):
             check("字节序标记" in out and "GB18030" not in out,
-                  "UTF-16 应按 BOM 识别，不应声称走 GB18030：\n%s" % out)
+                  "带 BOM 稿应按标记识别，不应声称走 GB18030：\n%s" % out)
         else:
             check("编码" not in out, "UTF-8 原稿不应打编码提示：\n%s" % out)
     src = os.path.join(root, "crlf.txt")
@@ -1078,6 +1133,35 @@ def t_intake_encoding():
     check(rc == 2 and "UTF-8" in out + err and "GB18030" in out + err,
           "两种编码都失败应明确拒收，rc=%d\n%s%s" % (rc, out, err))
 
+    # 旧编码只用于原稿。两份 JSON 都在语义合法、UTF-8 能成功时验证 GB18030 拒收。
+    json_root = workspace()
+    brief_path = os.path.join(json_root, "legacy-brief.json")
+    before = read(os.path.join(ws_dir(json_root), "brief.json"))
+    brief_text = json.dumps(BRIEF_V1, ensure_ascii=False)
+    with open(brief_path, "wb") as f:
+        f.write(brief_text.encode("gb18030"))
+    rc, out, err = run(json_root, "brief", "set", SLUG, "--from", brief_path)
+    check(rc == 2 and "UTF-8" in out + err,
+          "GB18030 brief 必须因编码拒收，rc=%d\n%s%s" % (rc, out, err))
+    check(read(os.path.join(ws_dir(json_root), "brief.json")) == before,
+          "拒收旧编码 brief 不得改写现有标准")
+    write(brief_path, brief_text)
+    rc, out, err = run(json_root, "brief", "set", SLUG, "--from", brief_path)
+    check(rc == 0, "同一份 UTF-8 brief 必须成功，不能因语义坏掉造成假阳性")
+    payload = {"context_hash": context(json_root)["context_hash"], "marks": marks_ok()}
+    marks_path = os.path.join(ws_dir(json_root), "inbox", MARKS_NAME)
+    marks_text = json.dumps(payload, ensure_ascii=False)
+    with open(marks_path, "wb") as f:
+        f.write(marks_text.encode("gb18030"))
+    rc, out, err = run(json_root, "review", SLUG)
+    check(rc == 2 and "UTF-8" in out + err,
+          "GB18030 marks 必须因编码拒收，rc=%d\n%s%s" % (rc, out, err))
+    check(not os.path.exists(os.path.join(ws_dir(json_root), MARKS_NAME)),
+          "拒收旧编码 marks 不得生成过闸记录")
+    write(marks_path, marks_text)
+    rc, out, err = run(json_root, "review", SLUG)
+    check(rc == 0, "同一份 UTF-8 marks 必须成功，rc=%d\n%s%s" % (rc, out, err))
+
 
 def t_intake_refuse():
     """内容签名优先于伪装后缀；正常文本与 docx 仍可收稿。"""
@@ -1088,7 +1172,11 @@ def t_intake_refuse():
             ("rtf", "rtf.txt", b"{\\rtf1 synthetic document}", ""),
             ("png", "png.txt", b"\x89PNG\r\n\x1a\n", ""),
             ("nul", "nul.txt", b"synthetic\x00bytes", ""),
-            ("csv", "table.csv", b"name,value\nalpha,1\n", "单元格")):
+            ("bom-nul", "bom-nul.txt", b"\xef\xbb\xbftext\x00bytes", "二进制"),
+            ("csv", "table.csv", b"name,value\nalpha,1\n", "单元格"),
+            ("zip", "archive.txt", b"PK\x03\x04plain", "压缩包"),
+            ("ext-pdf", "text.pdf", b"plain text", "PDF"),
+            ("fake-docx", "fake.docx", b"plain text", "有效的 .docx")):
         src = os.path.join(root, name)
         with open(src, "wb") as f:
             f.write(body)
@@ -1129,6 +1217,13 @@ def t_init_stdin():
     check(rc == 2 and "这份稿子是空的" in out + err,
           "stdin 空稿应明确拒收，rc=%d\n%s%s" % (rc, out, err))
 
+    for encoding in ("gb18030", "utf-16", "utf-32"):
+        rc, out, err = run(root, "init", "stdin-" + encoding, "--from", "-",
+                           stdin=DRAFT_NOTICE.replace("\n", "\r\n").encode(encoding))
+        check(rc == 0, "stdin 编码与文件同路，rc=%d\n%s%s" % (rc, out, err))
+        check(read(os.path.join(ws_dir(root, "stdin-" + encoding), "draft.txt")) == DRAFT_NOTICE,
+              "stdin 解码与换行应当逐字一致")
+
 
 def t_docx_notice():
     """只对实际含表格、文本框的 docx 提示对应限制。"""
@@ -1145,6 +1240,17 @@ def t_docx_notice():
         else:
             check("表格" not in out and "文本框" not in out,
                   "普通 docx 不应提示不存在的表格或文本框：\n%s" % out)
+
+    src = pack_docx(os.path.join(root, "shapes.docx"),
+        "<w:p><w:r><w:t>普通文字图注</w:t><w:pict/></w:r></w:p>"
+        "<w:p><w:ins><w:r><w:t>插入的字</w:t></w:r></w:ins>"
+        "<w:del><w:r><w:delText>删掉的字</w:delText></w:r></w:del></w:p>")
+    rc, out, err = run(root, "init", "shapes", "--from", src)
+    check(rc == 0 and "文字识别" in out and "修订痕迹" in out,
+          "图片与修订按实际出现提示，rc=%d\n%s%s" % (rc, out, err))
+    check(read(os.path.join(ws_dir(root, "shapes"), "draft.txt")) == "普通文字图注\n\n插入的字\n",
+          "图注作为普通文字保留，修订只取已有文字节点")
+    check("表格" not in out and "文本框" not in out, "不能提示不存在的结构")
 
 
 def t_root_after_subcommand():
