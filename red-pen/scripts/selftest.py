@@ -235,7 +235,7 @@ def make_rich_docx(path):
     return pack_docx(path, body)
 
 
-RICH_DOCX_WANT = "普通段落一\n\n表格单元一\n\n表格单元二\n\n文本框里的话\n\n普通段落二\n"
+RICH_DOCX_WANT = "普通段落一\n\n表格单元一\t表格单元二\n\n文本框里的话\n\n普通段落二\n"
 
 
 # ---------------------------------------------------------------- 跑脚本
@@ -248,8 +248,9 @@ def sweep():
         shutil.rmtree(_TEMPS.pop(), ignore_errors=True)
 
 
-def run(root, *args):
+def run(root, *args, stdin=None):
     proc = subprocess.run([PY, REDPEN, "--root", root] + [str(a) for a in args],
+                          input=stdin.encode("utf-8") if isinstance(stdin, str) else stdin,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return (proc.returncode,
             proc.stdout.decode("utf-8", "replace"),
@@ -363,6 +364,27 @@ def t_docx_table_and_textbox():
     pack = context(root)
     check(pack["draft_text"] == RICH_DOCX_WANT.strip().replace("\n\n", "\n"),
           "纯文本也应当每句一次：%r" % pack["draft_text"])
+
+    row_quote = "表格单元一\t表格单元二"
+    check(row_quote in pack["draft_text"], "整行引文必须来自 context 的正文")
+    rc, out, err = submit(root, [{"quote": row_quote, "level": "minor",
+                                 "note": "同一行的两个单元格需要一起说明。"}])
+    check(rc == 0, "表格整行引文应当过闸，rc=%d\n%s%s" % (rc, out, err))
+    record = json.loads(read(os.path.join(ws_dir(root), MARKS_NAME)))
+    check(record["marks"][0]["anchored"], "表格整行引文应当锚定")
+
+    # 独立的两行表格：短引文不触发头尾兜底，也不与其它批注重叠。
+    rows_src = pack_docx(os.path.join(root, "rows.docx"),
+        "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>甲行内容</w:t></w:r></w:p></w:tc></w:tr>"
+        "<w:tr><w:tc><w:p><w:r><w:t>乙行说明</w:t></w:r></w:p></w:tc></w:tr></w:tbl>")
+    rc, out, err = run(root, "init", "rows", "--from", rows_src)
+    check(rc == 0, "两行表格应当收进来，rc=%d\n%s%s" % (rc, out, err))
+    cross_quote = context(root, "rows")["draft_text"]
+    check(cross_quote == "甲行内容\n乙行说明", "两行之间必须保留块边界：%r" % cross_quote)
+    rc, out, err = submit(root, [{"quote": cross_quote, "level": "minor",
+                                 "note": "这条批注跨了两行，不能硬贴。"}], slug="rows")
+    check(rc == 1 and "锚定率" in out,
+          "跨两行引文应当因锚不上拒收，rc=%d\n%s%s" % (rc, out, err))
 
 
 def t_context_hash_includes_brief():
@@ -935,6 +957,319 @@ def t_doc_numbers_match():
               "常量 %s = %s 没有出现在闸门那一节里：改了常量要同一个 commit 改文档" % (name, value))
 
 
+def t_init_wording():
+    """新增收稿提示，同时锁住期 1 的字数口径与语言提示。"""
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    outputs = []
+    for slug, name, body, extra in (
+            ("wording-zh", "weekly.md", DRAFT_V1, ()),
+            ("wording-en", "mail.txt", DRAFT_EN, ()),
+            ("wording-lang", "explicit.txt", DRAFT_EN, ("--lang", "en"))):
+        src = os.path.join(root, "source", name)
+        write(src, body)
+        rc, out, err = run(root, "init", slug, "--from", src, *extra)
+        check(rc == 0, "init 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+        check("字（汉字按字、英文按词，标点不算）" in out,
+              "期 1 的字数口径必须逐字保留：\n%s" % out)
+        check(out.count("正文") == 1 and "词（" not in out,
+              "正文只许使用一把尺：\n%s" % out)
+        plain = redpen.anchor.plain_text(body)
+        got = re.search(r"正文 (\d+) 字", out)
+        check(got and int(got.group(1)) == redpen.unit_len(plain),
+              "正文应按 unit_len 计数：\n%s" % out)
+        if body == DRAFT_EN:
+            check(int(got.group(1)) != len(plain), "英文词数不应退回字符数")
+        if extra:
+            check("· 批语语言 en" in out, "期 1 的显式语言提示必须保留：\n%s" % out)
+        else:
+            check("批语语言" not in out, "无 brief、无 --lang 时不该猜批语语言：\n%s" % out)
+        outputs.append((src, "draft" + os.path.splitext(name)[1], out))
+    for src, landed, out in outputs:
+        check("收进来：" in out, "init 缺少「收进来：」一行：\n%s" % out)
+        check("建好工作区：" in out, "init 缺少「建好工作区：」一行：\n%s" % out)
+        intake = next(line for line in out.splitlines() if "收进来：" in line)
+        check(os.path.basename(src) in intake and landed in intake,
+              "收稿行应同时显示来源文件名与落地文件名：\n%s" % out)
+        check(src not in out, "收稿提示不应显示来源的绝对路径：\n%s" % out)
+
+
+def t_init_long_draft_warn():
+    """阈值两侧都验：长稿提醒条数上限，短稿不提醒。"""
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    # Task 2 尚未落常量；先以计划的 50000 写牙，常量落地后跟随它。
+    threshold = getattr(redpen, "DRAFT_WARN_CHARS", 50000)
+    for size, warned in ((threshold - 1, False), (threshold, True), (threshold + 1, True)):
+        src = os.path.join(root, "source", "long-%d.txt" % size)
+        write(src, "稿" * size)
+        rc, out, err = run(root, "init", "long-%d" % size, "--from", src)
+        check(rc == 0, "长短稿都应收进来，rc=%d\n%s%s" % (rc, out, err))
+        check(("一轮最多 30 条批注" in out) == warned,
+              "%d 字稿子的长稿提醒应为 %s：\n%s" % (size, warned, out))
+
+
+def t_init_same_draft_no_new_version():
+    """原样重收不改产物；真的换稿才归档第 1 版。"""
+    root = workspace()
+    rc, out, err = submit(root, marks_ok())
+    check(rc == 0, "前置 review 应通过，rc=%d\n%s%s" % (rc, out, err))
+    ws = ws_dir(root)
+    with open(os.path.join(ws, "review.html"), "rb") as f:
+        before = f.read()
+    with open(os.path.join(ws, MARKS_NAME), "rb") as f:
+        marks_before = f.read()
+    history_before = sorted(os.listdir(os.path.join(ws, "history")))
+    rc, out, err = run(root, "init", SLUG, "--from", os.path.join(root, "source", "draft.md"))
+    check(rc == 0, "原样重收应退出 0，rc=%d\n%s%s" % (rc, out, err))
+    check("没有收成新版本" in out, "原样重收应说明没有新版本：\n%s" % out)
+    with open(os.path.join(ws, "review.html"), "rb") as f:
+        check(f.read() == before, "原样重收不应改动 review.html 的任何字节")
+    check(os.path.isfile(os.path.join(ws, MARKS_NAME)), "原样重收必须保留 marks.json")
+    with open(os.path.join(ws, MARKS_NAME), "rb") as f:
+        check(f.read() == marks_before, "原样重收不应改动 marks.json")
+    check(sorted(os.listdir(os.path.join(ws, "history"))) == history_before,
+          "原样重收不应添加任何归档")
+    check(not os.path.exists(os.path.join(ws, "history", "v1")), "原样重收不应归档 v1")
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "原样重收后 check 仍须通过，rc=%d\n%s%s" % (rc, out, err))
+    src = os.path.join(root, "source", "revision.md")
+    write(src, DRAFT_V2)
+    rc, out, err = run(root, "init", SLUG, "--from", src)
+    check(rc == 0 and "第 2 版" in out,
+          "真正的新稿才应收成第 2 版，rc=%d\n%s%s" % (rc, out, err))
+    check(os.path.isdir(os.path.join(ws, "history", "v1")), "真正的新稿应归档 v1")
+
+
+def t_intake_encoding():
+    """原稿兼容旧编码与 BOM；普通 UTF-8 安静通过，非法字节明确拒收。"""
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    body = "第一行是合成稿件。\n第二行说明收稿编码。\n"
+    for encoding in ("utf-8", "gb18030", "gbk", "utf-16"):
+        src = os.path.join(root, encoding + ".txt")
+        with open(src, "wb") as f:
+            f.write(body.encode(encoding))
+        rc, out, err = run(root, "init", encoding, "--from", src)
+        check(rc == 0, "%s 原稿应可收进来，rc=%d\n%s%s" % (encoding, rc, out, err))
+        check(read(os.path.join(ws_dir(root, encoding), "draft.txt")) == body,
+              "%s 原稿解码后必须逐字保留" % encoding)
+        if encoding in ("gb18030", "gbk"):
+            check("GB18030" in out and all(line in out for line in body.splitlines()),
+                  "旧编码应报告 GB18030 并回显开头两行：\n%s" % out)
+        elif encoding == "utf-16":
+            check("字节序标记" in out and "GB18030" not in out,
+                  "UTF-16 应按 BOM 识别，不应声称走 GB18030：\n%s" % out)
+        else:
+            check("编码" not in out, "UTF-8 原稿不应打编码提示：\n%s" % out)
+    src = os.path.join(root, "crlf.txt")
+    with open(src, "wb") as f:
+        f.write(body.replace("\n", "\r\n").encode("utf-8"))
+    rc, out, err = run(root, "init", "crlf", "--from", src)
+    check(rc == 0, "CRLF 原稿应通过，rc=%d\n%s%s" % (rc, out, err))
+    with open(os.path.join(ws_dir(root, "crlf"), "draft.txt"), "rb") as f:
+        check(f.read() == body.encode("utf-8"), "CRLF 收稿应统一换行且不残留回车")
+    src = os.path.join(root, "invalid.txt")
+    with open(src, "wb") as f:
+        f.write(b"\xff\xff\xff")
+    rc, out, err = run(root, "init", "invalid", "--from", src)
+    check(rc == 2 and "UTF-8" in out + err and "GB18030" in out + err,
+          "两种编码都失败应明确拒收，rc=%d\n%s%s" % (rc, out, err))
+
+
+def t_intake_refuse():
+    """内容签名优先于伪装后缀；正常文本与 docx 仍可收稿。"""
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    for slug, name, body, reason in (
+            ("pdf", "pdf.txt", b"%PDF-1.4\nsynthetic document\n", "PDF"),
+            ("rtf", "rtf.txt", b"{\\rtf1 synthetic document}", ""),
+            ("png", "png.txt", b"\x89PNG\r\n\x1a\n", ""),
+            ("nul", "nul.txt", b"synthetic\x00bytes", ""),
+            ("csv", "table.csv", b"name,value\nalpha,1\n", "单元格")):
+        src = os.path.join(root, name)
+        with open(src, "wb") as f:
+            f.write(body)
+        rc, out, err = run(root, "init", slug, "--from", src)
+        check(rc == 2 and reason in out + err,
+              "%s 应拒收并说明格式，rc=%d\n%s%s" % (name, rc, out, err))
+    for suffix in ("docx", "md", "txt", "html", "note"):
+        src = os.path.join(root, "accepted." + suffix)
+        if suffix == "docx":
+            make_docx(src, DRAFT_NOTICE)
+        else:
+            write(src, "<p>普通的合成稿件。</p>" if suffix == "html" else DRAFT_NOTICE)
+        rc, out, err = run(root, "init", "accepted-" + suffix, "--from", src)
+        check(rc == 0, "%s 应正常收稿，rc=%d\n%s%s" % (suffix, rc, out, err))
+        check(bool(context(root, "accepted-" + suffix)["draft_text"]), "收稿正文不应丢失")
+        if suffix == "note":
+            check("不认得" in out, "未知后缀应说明按纯文本读取：\n%s" % out)
+
+
+def t_init_stdin():
+    """标准输入落为 draft.txt，并能走完整批注流程。"""
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    rc, out, err = run(root, "init", SLUG, "--from", "-", stdin=DRAFT_NOTICE)
+    check(rc == 0, "stdin 收稿应退出 0，rc=%d\n%s%s" % (rc, out, err))
+    ws = ws_dir(root)
+    check([name for name in os.listdir(ws) if name.startswith("draft.")] == ["draft.txt"],
+          "stdin 只应落成 draft.txt")
+    check(read(os.path.join(ws, "draft.txt")) == DRAFT_NOTICE, "stdin 内容必须逐字保留")
+    check(context(root)["draft_text"] == DRAFT_NOTICE.strip(), "stdin 稿的 context 应保留正文")
+    rc, out, err = submit(root, notice_marks_ok())
+    check(rc == 0, "stdin 稿应能 review，rc=%d\n%s%s" % (rc, out, err))
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 0, "stdin 稿应能 check，rc=%d\n%s%s" % (rc, out, err))
+    rc, out, err = run(root, "init", "stdin-pdf", "--from", "-", stdin=b"%PDF-1.4\n")
+    check(rc == 2 and "PDF" in out + err, "stdin PDF 应明确拒收，rc=%d\n%s%s" % (rc, out, err))
+    rc, out, err = run(root, "init", "stdin-empty", "--from", "-", stdin=b"")
+    check(rc == 2 and "这份稿子是空的" in out + err,
+          "stdin 空稿应明确拒收，rc=%d\n%s%s" % (rc, out, err))
+
+
+def t_docx_notice():
+    """只对实际含表格、文本框的 docx 提示对应限制。"""
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    for slug, src, rich in (
+            ("plain-docx", make_docx(os.path.join(root, "plain.docx"), DRAFT_NOTICE), False),
+            ("rich-docx", make_rich_docx(os.path.join(root, "rich.docx")), True)):
+        rc, out, err = run(root, "init", slug, "--from", src)
+        check(rc == 0, "docx 收稿应通过，rc=%d\n%s%s" % (rc, out, err))
+        if rich:
+            check(all(phrase in out for phrase in ("整行可以整句引", "跨行引不了", "文本框")),
+                  "含表格与文本框的 docx 应提示新的引文边界：\n%s" % out)
+        else:
+            check("表格" not in out and "文本框" not in out,
+                  "普通 docx 不应提示不存在的表格或文本框：\n%s" % out)
+
+
+def t_root_after_subcommand():
+    """工作区外也能把 --root 放在子命令后；重复给 root 要说清楚。"""
+    root = workspace()
+    unrelated = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(unrelated)
+    proc = subprocess.run([PY, REDPEN, "check", SLUG, "--root", root], cwd=unrelated,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    err = proc.stderr.decode("utf-8", "replace")
+    check(proc.returncode in (0, 1) and "usage:" not in err and "unrecognized" not in err,
+          "子命令后的 --root 应被识别，rc=%d\n%s" % (proc.returncode, err))
+    check(SLUG in proc.stdout.decode("utf-8", "replace"), "check 应实际找到指定根目录的稿件")
+    proc = subprocess.run([PY, REDPEN, "--root", ".", "check", SLUG, "--root", root],
+                          cwd=unrelated, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    err = proc.stderr.decode("utf-8", "replace")
+    check(proc.returncode == 2 and "--root 给了两次" in err,
+          "重复 root 应明确报错，rc=%d\n%s" % (proc.returncode, err))
+
+
+def t_usage_is_chinese():
+    """无参数和帮助页均给中文用法与子命令清单。"""
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    for args, want_rc in (((), 2), (("-h",), 0)):
+        proc = subprocess.run([PY, REDPEN] + list(args), cwd=root,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+        check(proc.returncode == want_rc, "%r 退出码应为 %d，实际 %d\n%s"
+              % (args, want_rc, proc.returncode, output))
+        check("usage:" not in output and "用法" in output,
+              "用法提示应使用中文：\n%s" % output)
+        check(all(name in output for name in
+                  ("doctor", "init", "brief", "context", "review", "stats", "check", "export")),
+              "中文用法应列齐子命令：\n%s" % output)
+        check(any(word in output for word in ("收稿", "收一份稿子", "工作区")),
+              "子命令清单应附中文说明：\n%s" % output)
+
+
+def t_doctor_absolute_and_drift():
+    """doctor 明示绝对根目录，只对临时任务目录提示漂移。"""
+    parent = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(parent)
+    ordinary = os.path.join(parent, "ordinary")
+    drift = os.path.join(parent, "WorkBuddy AI", "20260909-113000")
+    for root, warned in ((ordinary, False), (drift, True)):
+        os.makedirs(root)
+        rc, out, err = run(root, "doctor")
+        check(rc == 0, "doctor 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+        check(os.path.abspath(root) in out, "doctor 必须显示绝对根目录：\n%s" % out)
+        check("别抄进交给别人的报告" in out, "doctor 应提醒绝对路径只用于本机排障：\n%s" % out)
+        check(("临时目录" in out) == warned,
+              "临时任务目录提醒应为 %s：\n%s" % (warned, out))
+
+
+def t_no_abspath_outside_doctor():
+    """从工作区的兄弟目录调用，八条业务路径均不得泄露绝对根目录。"""
+    parent = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(parent)
+    root, sibling = os.path.join(parent, "workspace"), os.path.join(parent, "sibling")
+    os.makedirs(sibling)
+    src = os.path.join(root, "source", "draft.md")
+    write(src, DRAFT_V1)
+    brief_src = os.path.join(root, "source", "brief.json")
+    write(brief_src, json.dumps(BRIEF_V1, ensure_ascii=False))
+    before = os.getcwd()
+    results = []
+    try:
+        os.chdir(sibling)
+        for args in (("init", SLUG, "--from", src),
+                     ("brief", "set", SLUG, "--from", brief_src), ("context", SLUG)):
+            rc, out, err = run(root, *args)
+            check(rc == 0, "前置 %s 应通过，rc=%d\n%s%s" % (args[0], rc, out, err))
+            results.append((args[0], out + err))
+        payload = {"context_hash": json.loads(out)["context_hash"], "marks": marks_ok()}
+        write(os.path.join(ws_dir(root), "inbox", MARKS_NAME), json.dumps(payload, ensure_ascii=False))
+        for cmd in ("review", "stats", "check", "export"):
+            rc, out, err = run(root, cmd, SLUG)
+            check(rc == 0, "%s 应通过，rc=%d\n%s%s" % (cmd, rc, out, err))
+            results.append((cmd, out + err))
+        rc, out, err = run(root, "init", "missing", "--from", os.path.join(root, "missing.txt"))
+        check(rc == 2, "不存在的来源应退出 2，rc=%d\n%s%s" % (rc, out, err))
+        results.append(("init 缺文件", out + err))
+        rc, out, err = run(root, "doctor")
+        check(rc == 0 and root in out, "同根目录 doctor 必须显示绝对路径：\n%s%s" % (out, err))
+    finally:
+        os.chdir(before)
+    for cmd, output in results:
+        check(root not in output, "%s 不应泄露根目录绝对路径：\n%s" % (cmd, output))
+
+
+def t_doctor_scan_privacy():
+    """扫描只显示红笔工作区；同名 slug 的两处路径都要列明。"""
+    parent = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(parent)
+    roots = [os.path.join(parent, name) for name in ("first", "second")]
+    for root in roots:
+        write(os.path.join(ws_dir(root), MARKS_NAME), json.dumps({"slug": SLUG}))
+    unrelated = "unrelated-private-folder"
+    write(os.path.join(parent, unrelated, "notes.txt"), "与红笔无关的合成内容。")
+    rc, out, err = run(roots[0], "doctor", "--scan", parent)
+    check(rc == 0, "doctor --scan 应通过，rc=%d\n%s%s" % (rc, out, err))
+    check(any(SLUG in line and "在 2 处" in line for line in out.splitlines()),
+          "应报告同名 slug 在 2 处：\n%s" % out)
+    check(all(ws_dir(root) in out for root in roots), "应列出两处工作区的完整路径：\n%s" % out)
+    check(unrelated not in out + err, "不应输出无关目录名：\n%s%s" % (out, err))
+
+
+def t_readme_install():
+    """安装指令先建对应技能目录，不留占位仓库或依赖当前目录的 doctor。"""
+    text = read(os.path.join(SKILL_DIR, "README.md"))
+    check("git clone" not in text, "README 里出现了 git clone")
+    check("<org>/<repo>" not in text, "README 里出现了占位仓库地址")
+    check("python3 scripts/redpen.py doctor" not in text, "README 里出现了相对路径 doctor 示例")
+    blocks = re.findall(r"^```bash[^\n]*\n(.*?)^```\s*$", text, re.MULTILINE | re.DOTALL)
+    copies = 0
+    for block in blocks:
+        for copy in re.finditer(r"^\s*cp\s+-R\s+.+?\s+([^\s]+/skills/[^\s]*)", block, re.MULTILINE):
+            copies += 1
+            destination = copy.group(1)
+            skills_dir = destination.split("/skills/", 1)[0] + "/skills"
+            mkdir = r"^\s*mkdir\s+-p\s+" + re.escape(skills_dir) + r"/?\s*$"
+            check(re.search(mkdir, block[:copy.start()], re.MULTILINE),
+                  "复制到 %s 之前，同一 bash 块必须先 mkdir -p %s" % (destination, skills_dir))
+    check(copies > 0, "README 应保留可以实际运行的技能目录安装示例")
+
+
 SELFTESTS = (
     t_init_from_txt_md_html_docx,
     t_docx_table_and_textbox,
@@ -964,6 +1299,20 @@ SELFTESTS = (
     t_init_units_line,
     t_gates_ignore_lang,
     t_doc_numbers_match,
+    # 期 2：收稿提示 → 输入边界 → 命令行 → 路径隐私 → 安装说明
+    t_init_wording,
+    t_init_long_draft_warn,
+    t_init_same_draft_no_new_version,
+    t_intake_encoding,
+    t_intake_refuse,
+    t_init_stdin,
+    t_docx_notice,
+    t_root_after_subcommand,
+    t_usage_is_chinese,
+    t_doctor_absolute_and_drift,
+    t_no_abspath_outside_doctor,
+    t_doctor_scan_privacy,
+    t_readme_install,
 )
 
 
