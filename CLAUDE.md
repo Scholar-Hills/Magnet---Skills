@@ -21,7 +21,7 @@
 
 1. `python3 <skill>/scripts/selftest.py` 全绿（含攻击回归）
 2. `<skill>/examples/` 下每个示例题包 `author` 验证 **0 ERROR**（WARN 要在 PR 里逐条说明）
-3. **跨模型实测**：至少两个非 Claude 模型（如 WorkBuddy 上的 DeepSeek / Kimi）按 SKILL.md 各出 3 个知识点 × 5 题，专盯会不会跳过验证步骤、手写期望输出、把参考解贴给用户——任一发生就不发，先把门禁语句改硬
+3. **跨模型实测**：至少两个非 Claude 模型（如 WorkBuddy 上的 DeepSeek / Kimi）按 SKILL.md 各出 3 个知识点 × 5 题，专盯会不会跳过验证步骤、手写期望输出、把参考解贴给用户——任一发生就不发，先把门禁语句改硬。批改／批注类 Skill 的跨模型实测口径：每个非 Claude 模型各批 3 篇稿子、每篇 ≥5 条批注，其中至少 1 篇跑到第 2 版（否则验不到 `stats` 那条承诺）。
 
 没跑闸就不许说"可以发"；跑了没过就如实写"没过、卡在哪条"。
 
