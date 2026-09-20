@@ -23,6 +23,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import ntpath
 import os
 import re
 import shutil
@@ -233,13 +234,43 @@ def now_iso():
     return datetime.datetime.now().replace(microsecond=0).isoformat()
 
 
+_ROOT = "."
+
+
+def _set_root(root):
+    global _ROOT
+    _ROOT = os.path.abspath(root)
+
+
 def _shown(path):
-    """打印用的路径：能相对当前目录就相对，免得把本机绝对路径写进报告。"""
+    """业务路径相对 --root；目录外、跨盘符只能回显文件名。"""
     try:
-        rel = os.path.relpath(path)
+        rel = os.path.relpath(path, _ROOT)
+        if not os.path.isabs(rel) and rel != os.pardir and not rel.startswith(os.pardir + os.sep):
+            return rel
     except ValueError:
-        return os.path.abspath(path)
-    return rel if not rel.startswith("..") else os.path.abspath(path)
+        pass
+    return os.path.basename(os.path.normpath(path)) or "（根目录）"
+
+
+def _abs(path):
+    """仅供 doctor 当场核对目录，不用于业务输出。"""
+    return os.path.abspath(path)
+
+
+def _diagnostic(message):
+    """只处理诊断元数据，正文、brief 与编码预览不经过这里。"""
+    pattern = r"(?<![\w./\\])(?:[A-Za-z]:[\\/]|[\\/]+)[^\s\"'，。；（）：]+"
+    return re.sub(pattern, lambda m: ntpath.basename(m.group(0).rstrip("/\\")) or "（根目录）", message)
+
+
+def _metadata(value):
+    """拒收的键名与枚举／哈希／slug 值，只在诊断时缩短路径。"""
+    if isinstance(value, str):
+        if value.startswith(("/", "\\")) or ntpath.isabs(value):
+            return ntpath.basename(value.rstrip("/\\")) or "（根目录）"
+        return _diagnostic(value)
+    return value
 
 
 def _pct(ratio):
@@ -329,7 +360,7 @@ def resolve(root, target):
 
 def check_slug(slug):
     if not SLUG_RE.match(slug or ""):
-        raise UsageError("slug 只能是小写字母、数字与连字符（不超过 64 位），当前是：%r" % slug)
+        raise UsageError("slug 只能是小写字母、数字与连字符（不超过 64 位），当前是：%r" % _metadata(slug))
     return slug
 
 
@@ -394,13 +425,13 @@ def normalize_brief(raw):
     unknown = sorted(k for k in raw if k not in BRIEF_KEYS)
     if unknown:
         raise UsageError("brief 只认这四个键：%s；多出来的：%s"
-                         % ("、".join(BRIEF_KEYS), "、".join(unknown)))
+                         % ("、".join(BRIEF_KEYS), "、".join(_metadata(key) for key in unknown)))
     worries = raw.get("worries") or []
     if not isinstance(worries, list) or any(not isinstance(w, str) for w in worries):
         raise UsageError("brief 的 worries 应当是一串字符串")
     lang = str(raw.get("lang") or "zh").strip().lower()
     if lang not in LANGS:
-        raise UsageError("brief 的 lang 只能是 zh 或 en，当前是：%r" % raw.get("lang"))
+        raise UsageError("brief 的 lang 只能是 zh 或 en，当前是：%r" % _metadata(raw.get("lang")))
     return {
         "audience": str(raw.get("audience") or "").strip(),
         "purpose": str(raw.get("purpose") or "").strip(),
@@ -551,7 +582,7 @@ def _gate_top(payload):
         return ["%s 的顶层应当是一个 JSON 对象。" % os.path.join(INBOX_DIR, MARKS_NAME)]
     unknown = sorted(k for k in payload if k not in PAYLOAD_KEYS)
     if unknown:
-        return ["顶层只认 %s 这两个键，多出来的：%s。" % ("、".join(PAYLOAD_KEYS), "、".join(unknown))]
+        return ["顶层只认 %s 这两个键，多出来的：%s。" % ("、".join(PAYLOAD_KEYS), "、".join(_metadata(key) for key in unknown))]
     return []
 
 
@@ -561,7 +592,7 @@ def _gate_hash(draft_text, brief, payload):
     if got == want:
         return []
     return ["context_hash 对不上：交上来的是 %s，当前稿子与 brief 算出来的是 %s；"
-            "跑一次 context 拿到新的上下文包再重批。" % (_cut(got or "（空）", 16), _cut(want, 16))]
+            "跑一次 context 拿到新的上下文包再重批。" % (_cut(_metadata(got) or "（空）", 16), _cut(want, 16))]
 
 
 def _gate_count(items):
@@ -596,7 +627,7 @@ def _gate_one(idx, item):
     unknown = sorted(k for k in item if k not in MARK_KEYS)
     if unknown:
         errors.append("第 %d 条多了不认识的键：%s；只认 %s。"
-                      % (idx, "、".join(unknown), "、".join(MARK_KEYS)))
+                      % (idx, "、".join(_metadata(key) for key in unknown), "、".join(MARK_KEYS)))
     quote = str(item.get("quote") or "").strip()
     note = str(item.get("note") or "").strip()
     if not quote:
@@ -806,10 +837,13 @@ def cmd_init(args):
     slug = check_slug(args.slug)
     root = os.path.abspath(args.root)
     ws = os.path.join(root, DRAFTS_DIR, slug)
-    text, ext, extra = load_source(args.source)
+    try:
+        text, ext, extra = load_source(args.source)
+    except UsageError as e:
+        raise UsageError(str(e).replace(_shown(args.source), _source_label(args.source)))
     intake_notes = _intake_notes(args.source, ext, text, extra)
     if not text.strip():
-        raise UsageError("这份稿子是空的：%s" % _shown(args.source))
+        raise UsageError("这份稿子是空的：%s" % _source_label(args.source))
     current = draft_path(ws) if os.path.isdir(ws) else None
     if current and os.path.splitext(current)[1] == ext and read_text(current) == text:
         if args.lang:
@@ -1026,7 +1060,7 @@ def cmd_check(args):
     try:
         brief = read_brief(ws)
     except UsageError as e:
-        print("[ERROR] brief 不合规：%s" % e)
+        print("[ERROR] brief 不合规：%s" % _diagnostic(str(e)))
         return 1
 
     record_file = record_path(ws)
@@ -1096,8 +1130,124 @@ def cmd_export(args):
 
 # ---------------------------------------------------------------- doctor
 
+SCAN_DEPTH = 4
+SCAN_MAX_DIRS = 4000
+SCAN_MAX_HITS = 20
+SCAN_HOME_DIRS = tuple(os.path.join(os.path.expanduser("~"), name)
+                       for name in ("", "Documents", "Desktop", "Downloads"))
+_TEMPISH = re.compile(r"(?:^|[\\/])(?:[0-9]{8}-[0-9]{6}|[0-9]{4}(?:-[0-9]{2}){5})(?:[\\/]|$)")
+
+
+def _drift_hint(root):
+    return bool(_TEMPISH.search(os.path.abspath(root)))
+
+
+def scan_bases(root):
+    """默认起点与家目录／文稿目录不能有祖先或后代关系。"""
+    bases = []
+    for base in (os.path.abspath(root), os.path.dirname(os.path.abspath(root))):
+        real = os.path.realpath(base)
+        safe = True
+        for protected in SCAN_HOME_DIRS:
+            protected = os.path.realpath(protected)
+            try:
+                if os.path.commonpath((real, protected)) in (real, protected):
+                    safe = False
+                    break
+            except ValueError:
+                continue
+        if safe and base not in bases:
+            bases.append(base)
+    return bases
+
+
+def find_workspaces(base):
+    """有界只读扫描；只收 drafts/<合法 slug>/marks.json，不跟随符号链接。"""
+    result = {"hits": [], "limited": False, "unreadable": False, "invalid": False}
+    visited = 0
+
+    def visit(cur, depth):
+        nonlocal visited
+        if visited >= SCAN_MAX_DIRS:
+            result["limited"] = True
+            return
+        visited += 1
+        try:
+            with os.scandir(cur) as entries:
+                for entry in entries:
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    if os.path.basename(cur) == DRAFTS_DIR:
+                        # drafts 到此为止，不能下钻 inbox、history 或其它项目。
+                        if not SLUG_RE.fullmatch(entry.name):
+                            continue
+                        if visited >= SCAN_MAX_DIRS:
+                            result["limited"] = True
+                            break
+                        visited += 1
+                        path = os.path.join(entry.path, MARKS_NAME)
+                        if os.path.islink(path) or not os.path.isfile(path):
+                            continue
+                        try:
+                            with open(path, encoding="utf-8-sig") as stream:
+                                record = json.load(stream)
+                            if (not isinstance(record, dict) or record.get("slug") != entry.name
+                                    or not isinstance(record.get("marks"), list)
+                                    or not isinstance(record.get("at"), str)
+                                    or "T" not in record["at"]):
+                                raise ValueError("invalid record")
+                            datetime.datetime.fromisoformat(record["at"])
+                        except (ValueError, UnicodeError):
+                            result["invalid"] = True
+                            continue
+                        except OSError:
+                            result["unreadable"] = True
+                            continue
+                        result["hits"].append((entry.name, os.path.abspath(entry.path), record["at"]))
+                    elif depth >= SCAN_DEPTH:
+                        result["limited"] = True
+                    else:
+                        visit(entry.path, depth + 1)
+                        if visited >= SCAN_MAX_DIRS:
+                            result["limited"] = True
+                            break
+        except OSError:
+            result["unreadable"] = True
+
+    base = os.path.abspath(base)
+    if os.path.islink(base):
+        result["unreadable"] = True
+    else:
+        visit(base, 0)
+    return result
+
+
+def scan_report(hits):
+    """仅报告结构命中的目录；错误与截断提示永不带无关目录名。"""
+    groups = {}
+    for slug, path, at in sorted(set(hits["hits"])):
+        groups.setdefault(slug, []).append((path, at))
+    for slug in sorted(groups)[:SCAN_MAX_HITS]:
+        print("  %s 在 %d 处：" % (slug, len(groups[slug])))
+        for path, at in groups[slug]:
+            print("    %s · %s" % (path, at))
+    if len(groups) > SCAN_MAX_HITS:
+        print("还有 %d 个没列出来。" % (len(groups) - SCAN_MAX_HITS))
+    if not groups:
+        print("没有找到可报告的红笔工作区。")
+    if hits["limited"]:
+        print("达到扫描深度或目录数上限，结果可能不全，用 --scan <目录> 指个准的。")
+    if hits["unreadable"]:
+        print("有目录或记录无法读取，或起点是符号链接；结果可能不全，用 --scan <目录> 指个准的。")
+    if hits["invalid"]:
+        print("跳过了格式不完整或损坏的 marks.json。")
+    if groups:
+        print("扫描只报告，不搬任何文件。要把历史接起来，请先选固定工作区，自己按 history/v<N>/ "
+              "布局整理各版稿子与产物，保留原文件并避免覆盖；搬完跑 check，哈希或版本对不上就重跑 context 与 review。")
+
+
 def cmd_doctor(args):
-    root = os.path.abspath(args.root)
+    root = _abs(args.root)
     print("red-pen 环境检查（redpen.py 由 Python %d.%d.%d 运行，%s）"
           % (sys.version_info[0], sys.version_info[1], sys.version_info[2], sys.platform))
     worst = 0
@@ -1114,15 +1264,33 @@ def cmd_doctor(args):
             print("  [缺失] %s（%s）—— 整个 scripts/ 一起拷贝才完整" % (what, name))
             worst = 2
     base = os.path.join(root, DRAFTS_DIR)
-    slugs = sorted(d for d in os.listdir(base)) if os.path.isdir(base) else []
-    if slugs:
+    slugs = sorted(d for d in os.listdir(base)
+                   if SLUG_RE.fullmatch(d) and os.path.isdir(os.path.join(base, d))) if args.scan is None and os.path.isdir(base) else []
+    if args.scan is not None:
+        print("  [提示] 工作区根目录 %s；扫描结果只列有效记录。" % _abs(root))
+    elif slugs:
         print("  [OK]   工作区根目录 %s（已有 %d 份稿子：%s）"
-              % (_shown(root), len(slugs), "、".join(slugs[:6]) + ("…" if len(slugs) > 6 else "")))
+              % (_abs(root), len(slugs), "、".join(slugs[:6]) + ("…" if len(slugs) > 6 else "")))
     else:
-        print("  [提示] 工作区根目录 %s 下还没有 %s/，init 时会建" % (_shown(root), DRAFTS_DIR))
+        print("  [提示] 工作区根目录 %s 下还没有 %s/，init 时会建" % (_abs(root), DRAFTS_DIR))
     print("提示：脚本只读写工作区，不联网，不执行稿子里的任何代码；稿子本身一个字都不改。")
     print("      docx 只读 %s 里的文字段落：表格按行读出、整行可以引，跨行引不了，文本框的文字按位置读一次；"
           "图片与修订痕迹不支持。" % WORD_MAIN)
+    if _drift_hint(root):
+        print("看着像宿主给每个任务新建的临时目录：历轮批注会落进不同目录，stats 就比不出『上一版哪几条消失了』，先选固定文件夹或每次带 --root。")
+    if args.scan is not None:
+        bases = [os.path.abspath(args.scan)] if args.scan else scan_bases(root)
+        if not bases:
+            print("默认起点里没有安全可扫的目录，用 --scan <目录> 指一个准的。")
+        else:
+            hits = {"hits": [], "limited": False, "unreadable": False, "invalid": False}
+            for base in bases:
+                found = find_workspaces(base)
+                hits["hits"].extend(found["hits"])
+                for key in ("limited", "unreadable", "invalid"):
+                    hits[key] = hits[key] or found[key]
+            scan_report(hits)
+    print("这行绝对路径是给你自己核对用的，别抄进交给别人的报告或产物里。")
     return worst
 
 
@@ -1165,8 +1333,17 @@ def _argparse_zh(message):
 
 
 class Parser(argparse.ArgumentParser):
+    def parse_known_args(self, args=None, namespace=None):
+        self._input_args = list(sys.argv[1:] if args is None else args)
+        return super().parse_known_args(args, namespace)
+
     def error(self, message):
-        self.exit(2, "错误：%s\n" % _argparse_zh(message))
+        for value in sorted(getattr(self, "_input_args", []), key=len, reverse=True):
+            candidate = value.split("=", 1)[-1] if value.startswith("--") else value
+            if candidate:
+                label = _metadata(candidate)
+                message = message.replace(repr(candidate), repr(label)).replace(candidate, label)
+        self.exit(2, "错误：%s\n" % _diagnostic(_argparse_zh(message)))
 
 
 class _HelpZh(argparse.Action):
@@ -1187,7 +1364,9 @@ def build_parser():
                          help="工作区根目录（也可写在子命令前面）")
         return one
 
-    add("doctor", "查看本机环境与工作区")
+    doctor = add("doctor", "查看本机环境与工作区")
+    doctor.add_argument("--scan", nargs="?", const="", default=None,
+                        help="只报告散落的红笔工作区；可显式指定扫描目录")
 
     i = add("init", "收一份稿子建工作区；正文与后缀没变就不升版本")
     i.add_argument("slug")
@@ -1229,15 +1408,23 @@ def main(argv=None):
         if inner is not None and top is not None and os.path.abspath(inner) != os.path.abspath(top):
             raise UsageError("--root 给了两次而且不一样，只能给一个工作区。")
         args.root = inner or top or "."
+        _set_root(args.root)
         return handlers[args.command](args)
     except UsageError as e:
-        print("错误：%s" % e, file=sys.stderr)
+        print("错误：%s" % _diagnostic(str(e)), file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print("已中断", file=sys.stderr)
         return 2
+    except OSError as e:
+        filenames = [getattr(e, key, None) for key in ("filename", "filename2")]
+        shown = "、".join(_source_label(path) if path == getattr(args, "source", None)
+                         else _shown(path) for path in filenames if path)
+        print("错误：文件操作失败（%s，错误码 %s）%s。请检查文件类型与访问权限。"
+              % (type(e).__name__, e.errno, "：" + shown if shown else ""), file=sys.stderr)
+        return 2
     except Exception as e:
-        print("错误：%s：%s" % (type(e).__name__, e), file=sys.stderr)
+        print("错误：%s：%s" % (type(e).__name__, _diagnostic(str(e))), file=sys.stderr)
         return 2
 
 

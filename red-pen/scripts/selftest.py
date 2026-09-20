@@ -1352,7 +1352,10 @@ def t_doctor_absolute_and_drift():
     _TEMPS.append(parent)
     ordinary = os.path.join(parent, "ordinary")
     drift = os.path.join(parent, "WorkBuddy AI", "20260909-113000")
-    for root, warned in ((ordinary, False), (drift, True)):
+    for root, warned in ((ordinary, False), (drift, True),
+                         (os.path.join(parent, "WorkBuddy AI", "2026-09-10-17-28-49"), True),
+                         (os.path.join(parent, "2026-09-10"), False),
+                         (os.path.join(parent, "project-20260909-113000"), False)):
         os.makedirs(root)
         rc, out, err = run(root, "doctor")
         check(rc == 0, "doctor 应退出 0，rc=%d\n%s%s" % (rc, out, err))
@@ -1361,9 +1364,18 @@ def t_doctor_absolute_and_drift():
         check(("临时目录" in out) == warned,
               "临时任务目录提醒应为 %s：\n%s" % (warned, out))
 
+    import ast
+    tree = ast.parse(read(REDPEN))
+    for function in (node for node in tree.body if isinstance(node, ast.FunctionDef)):
+        calls = [node.func.id for node in ast.walk(function)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+        check("_abs" not in calls or function.name == "cmd_doctor", "_abs 只能由 doctor 调用")
+        if function.name == "main":
+            check(calls.count("_set_root") == 1, "主入口合流后只能设置一次路径基准")
+
 
 def t_no_abspath_outside_doctor():
-    """从工作区的兄弟目录调用，八条业务路径均不得泄露绝对根目录。"""
+    """兄弟目录调用：业务元数据、参数与文件错误不泄漏，用户正文仍原样输出。"""
     parent = tempfile.mkdtemp(prefix="red-pen-selftest-")
     _TEMPS.append(parent)
     root, sibling = os.path.join(parent, "workspace"), os.path.join(parent, "sibling")
@@ -1390,29 +1402,256 @@ def t_no_abspath_outside_doctor():
         rc, out, err = run(root, "init", "missing", "--from", os.path.join(root, "missing.txt"))
         check(rc == 2, "不存在的来源应退出 2，rc=%d\n%s%s" % (rc, out, err))
         results.append(("init 缺文件", out + err))
+        def probe(label, args, expected, fragment=None, root_arg=root):
+            rc, out, err = run(root_arg, *args)
+            check(rc == expected, "%s rc=%d\n%s%s" % (label, rc, out, err))
+            output = out + err
+            check("Traceback" not in output, "%s 不应打印调用栈：%s" % (label, output))
+            if fragment:
+                check(fragment in output, "%s 缺路径／错误细节 %r：%s" % (label, fragment, output))
+            results.append((label, output))
+            return output
+
+        relative = os.path.join("drafts", SLUG)
+        output = probe("review 根目录基准", ("review", SLUG), 0, relative + "/marks.json")
+        check(relative + "/history/review-0002.json" in output, "留档应使用根目录基准")
+        probe("直接工作区参数", ("check", ws_dir(root)), 0)
+        probe("根目录外工作区", ("review", ws_dir(root)), 0, "写出：marks.json · review.html", root_arg=sibling)
+        for cmd in ("context", "review", "stats", "check", "export"):
+            probe(cmd + " 缺工作区", (cmd, "absent"), 2, "drafts/absent")
+        probe("缺目录参数", ("check", os.path.join(root, "absent")), 2, "absent")
+        for args in (("check", SLUG, os.path.join(root, "private space", "secret.txt")),
+                     ("check", SLUG, "--unknown=" + src),
+                     ("init", SLUG, "--from", src, "--lang", src),
+                     ("brief", src, SLUG, "--from", brief_src),
+                     ("init", src, "--from", src)):
+            probe("非法参数", args, 2)
+        # Python 3.13 的 ntpath.isabs 不认单根反斜线；空格不能截断精确 token。
+        rooted = r"\private-user\hidden directory\secret.txt"
+        for args in (("init", SLUG, "--from", src, "--lang", rooted),
+                     ("init", rooted, "--from", src)):
+            output = probe("含空格的根反斜线参数", args, 2, "'secret.txt'")
+            check("private-user" not in output and "hidden directory" not in output,
+                  "参数解析与运行时诊断都只能回显文件名：%s" % output)
+        probe("来源是目录", ("init", "directory", "--from", root), 2, "目录")
+        probe("来源父级是文件", ("init", "notdir", "--from", src + "/child.txt"), 2, "文件操作失败")
+        probe("输出根是文件", ("init", "badroot", "--from", src), 2, "文件操作失败", root_arg=src)
+        bad_json = os.path.join(root, "source", "bad.json")
+        write(bad_json, "{")
+        probe("坏 JSON", ("brief", "set", SLUG, "--from", bad_json), 2, "JSON 解析失败")
+
+        # 被拒的参数／schema 元数据不是正文；兼顾 Windows 原串与 repr 转义。
+        metadata_paths = (os.path.join(root, "private metadata", "secret.txt"),
+                          r"\\private-server\private-share\secret.txt",
+                          r"\private-user\secret.txt",
+                          r"C:\private user\private project\secret.txt")
+        for path in metadata_paths:
+            output = probe("路径 slug", ("init", path, "--from", src), 2, "secret.txt")
+            check(not any(word in output for word in
+                          ("private metadata", "private-server", "private-share", "private-user", "private user", "private project")),
+                  "无效 slug 不得回显目录层级：%s" % output)
+            for diagnostic in (path, repr(path)):
+                check(redpen._diagnostic(diagnostic).count("private-server") == 0
+                      and "private-share" not in redpen._diagnostic(diagnostic)
+                      and "private-user" not in redpen._diagnostic(diagnostic),
+                      "诊断助手须覆盖原串与 repr 中的 UNC／根反斜线路径")
+            for changed in ({"lang": path}, {path: "unexpected"}):
+                write(os.path.join(ws_dir(root), "brief.json"),
+                      json.dumps(dict(BRIEF_V1, **changed), ensure_ascii=False))
+                output = probe("check 拒收 brief 元数据", ("check", SLUG), 1, "secret.txt")
+                check(not any(word in output for word in
+                              ("private metadata", "private-server", "private-share", "private-user", "private user", "private project")),
+                      "check 局部捕获也不得回显目录层级：%s" % output)
+        write(os.path.join(ws_dir(root), "brief.json"), json.dumps(BRIEF_V1, ensure_ascii=False))
+        for field in ("top-key", "mark-key", "hash", "level"):
+            changed = json.loads(json.dumps(payload))
+            path = metadata_paths[1]
+            if field == "top-key":
+                changed[path] = "unexpected"
+            elif field == "mark-key":
+                changed["marks"][0][path] = "unexpected"
+            elif field == "hash":
+                changed["context_hash"] = path
+            else:
+                changed["marks"][0]["level"] = path
+            write(os.path.join(ws_dir(root), "inbox", MARKS_NAME), json.dumps(changed, ensure_ascii=False))
+            output = probe("批注元数据 " + field, ("review", SLUG), 0 if field == "level" else 1)
+            check("private-server" not in output and "private-share" not in output,
+                  "批注元数据不得回显路径：%s" % output)
+        write(os.path.join(ws_dir(root), "inbox", MARKS_NAME), json.dumps(payload, ensure_ascii=False))
+
+        # 正常 brief 与批注内容可含路径，不能对所有业务输出作整体涂抹。
+        prose = "请核对这份文档路径：" + metadata_paths[1]
+        brief_with_path = dict(BRIEF_V1, audience=prose, purpose=prose, worries=[prose])
+        write(brief_src, json.dumps(brief_with_path, ensure_ascii=False))
+        rc, out, err = run(root, "brief", "set", SLUG, "--from", brief_src)
+        check(rc == 0 and out.count(prose) == 3, "正常 brief 的路径内容须原样回显")
+        pack = context(root)
+        check(pack["brief"] == brief_with_path, "context 里的正常 brief 必须原样保留")
+        duplicate = {"context_hash": pack["context_hash"],
+                     "marks": [{"quote": "上周我们把周会的复盘模板改短了", "note": prose},
+                               {"quote": "当然也有代价", "note": prose}]}
+        write(os.path.join(ws_dir(root), "inbox", MARKS_NAME), json.dumps(duplicate, ensure_ascii=False))
+        rc, out, err = run(root, "review", SLUG)
+        check(rc == 1 and redpen._cut(prose) in out, "重复批语错误中的真实用户文字不能被删改")
+        write(os.path.join(ws_dir(root), "brief.json"), json.dumps(BRIEF_V1, ensure_ascii=False))
+        write(os.path.join(ws_dir(root), "inbox", MARKS_NAME), json.dumps(payload, ensure_ascii=False))
+        page = os.path.join(ws_dir(root), "review.html")
+        os.remove(page)
+        probe("缺红笔页", ("check", SLUG), 1, relative + "/review.html")
+        os.remove(os.path.join(ws_dir(root), MARKS_NAME))
+        probe("缺审定记录", ("check", SLUG), 1, relative + "/marks.json")
+        for cmd in ("stats", "export"):
+            probe(cmd + " 缺审定记录", (cmd, SLUG), 2, relative + "/marks.json")
+        os.remove(os.path.join(ws_dir(root), "inbox", MARKS_NAME))
+        probe("缺提交记录", ("review", SLUG), 2, relative + "/inbox/marks.json")
+        os.remove(os.path.join(ws_dir(root), "draft.md"))
+        probe("check 缺原稿", ("check", SLUG), 1, relative)
+        probe("context 缺原稿", ("context", SLUG), 2, relative)
+
+        # 跨盘符路径在 POSIX 无法实造，定点模拟 relpath 的平台异常。
+        from unittest import mock
+        import contextlib
+        import io
+        old_root = redpen._ROOT
+        try:
+            redpen._set_root(root)
+            with mock.patch.object(redpen.os.path, "relpath", side_effect=ValueError):
+                check(redpen._shown(src) == "draft.md", "跨盘符必须退文件名")
+            with mock.patch.object(redpen, "cmd_context", side_effect=PermissionError(13, "denied", src)):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    rc = redpen.main(["--root", root, "context", SLUG])
+                check(rc == 2 and "错误码 13" in stderr.getvalue(), "权限错误应退出 2 并保留错误码")
+                results.append(("权限错误", stdout.getvalue() + stderr.getvalue()))
+        finally:
+            redpen._ROOT = old_root
+
+        # 不能把正文里的路径当成元数据删掉；编码猜测预览也须原样保留。
+        private_text = "这是用户原稿里的路径：" + os.path.join(root, "private", "memo.txt")
+        encoded = os.path.join(root, "source", "legacy.txt")
+        with open(encoded, "wb") as stream:
+            stream.write(private_text.encode("gb18030"))
+        rc, out, err = run(root, "init", "literal", "--from", encoded)
+        check(rc == 0 and private_text in out, "编码预览不能删用户原稿里的路径")
+        rc, out, err = run(root, "context", "literal")
+        check(rc == 0 and json.loads(out)["draft_text"].strip() == private_text,
+              "context 里的用户正文必须原样保留")
         rc, out, err = run(root, "doctor")
         check(rc == 0 and root in out, "同根目录 doctor 必须显示绝对路径：\n%s%s" % (out, err))
     finally:
         os.chdir(before)
     for cmd, output in results:
-        check(root not in output, "%s 不应泄露根目录绝对路径：\n%s" % (cmd, output))
+        check(parent not in output and sibling not in output, "%s 不应泄露绝对路径：\n%s" % (cmd, output))
 
 
 def t_doctor_scan_privacy():
-    """扫描只显示红笔工作区；同名 slug 的两处路径都要列明。"""
+    """扫描有界只读，只报告有效记录，默认不跨入广域目录，显式扫描仍可用。"""
+    from unittest import mock
+    import contextlib
+    import hashlib
+    import io
     parent = tempfile.mkdtemp(prefix="red-pen-selftest-")
     _TEMPS.append(parent)
-    roots = [os.path.join(parent, name) for name in ("first", "second")]
+    base = os.path.join(parent, "scan")
+    roots = [os.path.join(base, name) for name in ("first", "second")]
+    at = "2026-09-10T17:28:49"
+
+    def record(root, slug=SLUG):
+        write(os.path.join(ws_dir(root, slug), MARKS_NAME),
+              json.dumps({"slug": slug, "at": at, "marks": []}))
+
     for root in roots:
-        write(os.path.join(ws_dir(root), MARKS_NAME), json.dumps({"slug": SLUG}))
+        record(root)
     unrelated = "unrelated-private-folder"
-    write(os.path.join(parent, unrelated, "notes.txt"), "与红笔无关的合成内容。")
-    rc, out, err = run(roots[0], "doctor", "--scan", parent)
-    check(rc == 0, "doctor --scan 应通过，rc=%d\n%s%s" % (rc, out, err))
-    check(any(SLUG in line and "在 2 处" in line for line in out.splitlines()),
-          "应报告同名 slug 在 2 处：\n%s" % out)
-    check(all(ws_dir(root) in out for root in roots), "应列出两处工作区的完整路径：\n%s" % out)
-    check(unrelated not in out + err, "不应输出无关目录名：\n%s%s" % (out, err))
+    write(os.path.join(base, unrelated, "notes.txt"), "与红笔无关的合成内容。")
+    # 假结构、损坏 JSON 与时间戳都不能成为可报告路径。
+    write(os.path.join(base, unrelated, MARKS_NAME), json.dumps({"slug": SLUG, "at": at}))
+    for slug, content in (("broken-json", "{"), ("not-object", "[]"),
+                          ("bad-time", json.dumps({"slug": "bad-time", "at": "secret", "marks": []})),
+                          ("bad-shape", json.dumps({"slug": "bad-shape", "at": at, "marks": {}}))):
+        write(os.path.join(ws_dir(roots[0], slug), MARKS_NAME), content)
+    # 目录链接、工作区链接、记录链接均不得跟随。
+    outside = os.path.join(parent, "outside")
+    record(outside, "outside-only")
+    os.symlink(outside, os.path.join(base, "linked-tree"), target_is_directory=True)
+    os.symlink(ws_dir(outside, "outside-only"), os.path.join(roots[0], "drafts", "linked-workspace"), target_is_directory=True)
+    linked_record = os.path.join(ws_dir(roots[0], "linked-record"), MARKS_NAME)
+    os.makedirs(os.path.dirname(linked_record))
+    os.symlink(os.path.join(ws_dir(outside, "outside-only"), MARKS_NAME), linked_record)
+    record(ws_dir(roots[0]), "nested-must-stop")
+    deep = os.path.join(base, "a", "b", "c", "d", "e")
+    record(deep, "too-deep")
+
+    def snapshot():
+        result = {}
+        for cur, dirs, files in os.walk(parent, followlinks=False):
+            for name in files + dirs:
+                path = os.path.join(cur, name)
+                if os.path.islink(path):
+                    result[path] = ("link", os.readlink(path))
+                elif os.path.isfile(path):
+                    with open(path, "rb") as stream:
+                        result[path] = hashlib.sha256(stream.read()).hexdigest()
+                else:
+                    result[path] = "directory"
+        return result
+
+    before = snapshot()
+    rc, out, err = run(roots[0], "doctor", "--scan", base)
+    check(rc == 0 and not err, "doctor --scan 应通过，rc=%d\n%s%s" % (rc, out, err))
+    check(any(SLUG in line and "在 2 处" in line for line in out.splitlines()), "同名 slug 应归并：\n%s" % out)
+    check(all(ws_dir(root) in out for root in roots) and out.count(at) == 2, "两处路径与时间戳应齐全")
+    for forbidden in (unrelated, outside, "too-deep", "nested-must-stop", "linked-tree",
+                      "broken-json", "not-object", "bad-time", "bad-shape", "linked-workspace", "linked-record"):
+        check(forbidden not in out + err, "不应报告无关或未访问路径：%s\n%s" % (forbidden, out))
+    for slug in ("broken-json", "not-object", "bad-time", "bad-shape", "linked-workspace", "linked-record"):
+        check(ws_dir(roots[0], slug) not in out, "无效记录路径不应输出")
+    check("结果可能不全" in out and "跳过" in out and "不搬" in out and "history/v<N>/" in out,
+          "截断、坏记录与整理指路应明说：\n%s" % out)
+    check(snapshot() == before, "scan 不得搬移或改写任何文件")
+
+    # 受保护目录的上层与下层都排除；不偷偷把扫描扩展到 home。
+    home = os.path.join(parent, "home")
+    project = os.path.join(home, "Documents", "project")
+    record(project)
+    with mock.patch.object(redpen, "SCAN_HOME_DIRS", (home, os.path.join(home, "Documents"))):
+        for path in (home, project, parent):
+            check(redpen.scan_bases(path) == [], "默认扫描不能包含／位于受保护目录：%s" % path)
+        stdout = io.StringIO()
+        old_root = redpen._ROOT
+        try:
+            with contextlib.redirect_stdout(stdout):
+                rc = redpen.main(["--root", project, "doctor", "--scan"])
+            check(rc == 0 and "没有安全可扫" in stdout.getvalue(), "默认全排除应正常退出并指路")
+        finally:
+            redpen._ROOT = old_root
+    rc, out, err = run(project, "doctor", "--scan", home)
+    check(rc == 0 and ws_dir(project) in out, "显式扫描必须能绕过默认保护范围")
+
+    # 把限额调小，实扫少量目录即可验截断；不依赖遍历顺序。
+    def report(found):
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            redpen.scan_report(found)
+        return stream.getvalue()
+
+    with mock.patch.object(redpen, "SCAN_MAX_DIRS", 1):
+        found = redpen.find_workspaces(base)
+        check(found["limited"] and "结果可能不全" in report(found), "目录数截断不能静默")
+    many = os.path.join(parent, "many")
+    for index in range(3):
+        record(many, "item-%d" % index)
+    with mock.patch.object(redpen, "SCAN_MAX_HITS", 2):
+        output = report(redpen.find_workspaces(many))
+        check("还有 1 个没列出来" in output and output.count("在 1 处") == 2, "slug 展示上限与剩余数必须准确")
+    with mock.patch.object(redpen.os, "scandir", side_effect=PermissionError(13, "denied", unrelated)):
+        found = redpen.find_workspaces(base)
+        output = report(found)
+        check(found["unreadable"] and "结果可能不全" in output and unrelated not in output,
+              "读取失败要明说但不能带无关目录名")
+    found = redpen.find_workspaces(os.path.join(base, "linked-tree"))
+    check(not found["hits"] and found["unreadable"], "显式链接起点也不能跳进其它树")
 
 
 def t_readme_install():
