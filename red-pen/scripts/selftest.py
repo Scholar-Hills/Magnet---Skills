@@ -1255,8 +1255,9 @@ def t_docx_notice():
 
 def t_root_after_subcommand():
     """工作区外也能把 --root 放在子命令后；重复给 root 要说清楚。"""
-    root = workspace()
-    unrelated = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    # macOS 临时目录可能经 /var 符号链接进入；固定实际 cwd，测试 abspath 而非 realpath。
+    root = os.path.realpath(workspace())
+    unrelated = os.path.realpath(tempfile.mkdtemp(prefix="red-pen-selftest-"))
     _TEMPS.append(unrelated)
     proc = subprocess.run([PY, REDPEN, "check", SLUG, "--root", root], cwd=unrelated,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1269,13 +1270,43 @@ def t_root_after_subcommand():
     err = proc.stderr.decode("utf-8", "replace")
     check(proc.returncode == 2 and "--root 给了两次" in err,
           "重复 root 应明确报错，rc=%d\n%s" % (proc.returncode, err))
+    check("Traceback" not in err and root not in err,
+          "root 冲突应受控报错，且不回显绝对路径：\n%s" % err)
+
+    # 前后的相对／绝对别名指向同一个根时可接受，不能把省略项覆盖成默认根。
+    relative = os.path.relpath(root, unrelated)
+    for args, cwd in ((("--root", relative, "context", SLUG, "--root", root), unrelated),
+                      (("--root", root, "context", SLUG, "--root", relative), unrelated),
+                      (("--root", root, "context", SLUG), unrelated),
+                      (("context", SLUG), root)):
+        proc = subprocess.run([PY, REDPEN] + list(args), cwd=cwd,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        check(proc.returncode == 0, "同根别名、前置 root 与默认根均应可用：%r\n%s"
+              % (args, proc.stderr.decode("utf-8", "replace")))
+        check(json.loads(proc.stdout)["brief"] == BRIEF_V1, "应取到指定工作区的 brief")
+
+    rc, out, err = submit(root, marks_ok())
+    check(rc == 0, "准备完整工作区应通过：\n%s%s" % (out, err))
+    commands = (("doctor",),
+                ("init", SLUG, "--from", os.path.join(root, "source", "draft.md")),
+                ("brief", "set", SLUG, "--from", os.path.join(root, "source", "brief-%s.json" % SLUG)),
+                ("context", SLUG), ("review", SLUG), ("stats", SLUG),
+                ("check", SLUG), ("export", SLUG))
+    for args in commands:
+        proc = subprocess.run([PY, REDPEN] + list(args) + ["--root", root], cwd=unrelated,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+        check(proc.returncode == 0, "每个子命令都应接受后置 root：%r，rc=%d\n%s"
+              % (args, proc.returncode, output))
+    check(not os.path.exists(os.path.join(unrelated, "drafts")), "命令不能误写到当前目录")
 
 
 def t_usage_is_chinese():
     """无参数和帮助页均给中文用法与子命令清单。"""
     root = tempfile.mkdtemp(prefix="red-pen-selftest-")
     _TEMPS.append(root)
-    for args, want_rc in (((), 2), (("-h",), 0)):
+    pages = []
+    for args, want_rc in (((), 2), (("-h",), 0), (("--help",), 0)):
         proc = subprocess.run([PY, REDPEN] + list(args), cwd=root,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         output = (proc.stdout + proc.stderr).decode("utf-8", "replace")
@@ -1288,6 +1319,31 @@ def t_usage_is_chinese():
               "中文用法应列齐子命令：\n%s" % output)
         check(any(word in output for word in ("收稿", "收一份稿子", "工作区")),
               "子命令清单应附中文说明：\n%s" % output)
+        check("--root" in output and "前面或后面" in output and "相同才接受" in output,
+              "帮助应准确说明 root 的位置与同根重复规则：\n%s" % output)
+        check(not proc.stderr, "帮助应打印到标准输出")
+        pages.append(output)
+    check(len(set(pages)) == 1, "无参数、-h 与 --help 应打印同一份中文用法")
+
+    cases = ((("not-a-command",), "没有这个子命令", "doctor"),
+             (("check", SLUG, "--wrong"), "这个参数放错位置了", "--wrong"),
+             (("init", SLUG), "少了必填参数", "--from"),
+             (("check",), "少了必填参数", "slug"),
+             (("--root",), "这个选项后面要跟一个值", "--root"),
+             (("init", SLUG, "--from"), "这个选项后面要跟一个值", "--from"),
+             (("init", SLUG, "--from", "draft.txt", "--lang", "fr"), "参数 --lang 的值不对", "zh"),
+             (("brief", "wrong", SLUG, "--from", "brief.json"), "参数 action 的值不对", "set"))
+    for args, phrase, detail in cases:
+        proc = subprocess.run([PY, REDPEN] + list(args), cwd=root,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output = proc.stderr.decode("utf-8", "replace")
+        check(proc.returncode == 2 and phrase in output and detail in output,
+              "参数错误应给准确的中文改法：%r，rc=%d\n%s" % (args, proc.returncode, output))
+        check(not proc.stdout and not any(raw in output for raw in
+                  ("usage:", "invalid choice", "unrecognized arguments", "required", "expected one argument", "Traceback")),
+              "四类报错不能漏出英文模板或调用栈：\n%s" % output)
+        if phrase.startswith("参数 "):
+            check("没有这个子命令" not in output, "选项／动作取值错误不能误报成子命令错误")
 
 
 def t_doctor_absolute_and_drift():

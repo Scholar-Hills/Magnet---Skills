@@ -7,7 +7,7 @@
 
 子命令：
   doctor                              查看本机环境与工作区
-  init <slug> --from <file> [--lang]  收一份稿子建工作区；同名再跑一次算新版本
+  init <slug> --from <file> [--lang]  收一份稿子；正文与后缀没变就不升版本
   brief set <slug> --from <file>      写入「给谁看 / 要达到什么 / 最怕什么」
   context <slug>                      输出上下文包 JSON（纯文本、brief、context_hash）
   review <slug>                       读 inbox/marks.json → 闸门 → 锚定 → 红笔页
@@ -1128,19 +1128,73 @@ def cmd_doctor(args):
 
 # ---------------------------------------------------------------- 入口
 
+SUBCOMMANDS = ("doctor", "init", "brief", "context", "review", "stats", "check", "export")
+USAGE_ZH = """用法：python3 redpen.py [--root <工作区>] <子命令> [参数]
+
+子命令：
+  doctor                              查看本机环境与工作区
+  init <稿件名> --from <文件>          收一份稿子；正文与后缀没变就不升版本
+  brief set <稿件名> --from <文件>     写入给谁看、要达到什么、最怕什么
+  context <稿件名>                     输出上下文包
+  review <稿件名>                      跑闸门并锚定批注，写红笔页
+  stats <稿件名>                       查看锚定率、等级分布与上一版对比
+  check <稿件名或目录>                 离线复核整个工作区
+  export <稿件名>                      导出只有哈希与计数的脱敏证据
+
+--root 写在子命令前面或后面都认，建议只给一次；默认使用当前目录。
+前后各给一次时，按当前目录转成绝对路径后相同才接受，不同则退出 2。
+-h、--help 查看本说明；子命令后加 -h 查看该命令的参数。"""
+
+
+def _argparse_zh(message):
+    """翻译四类参数错误，保留选项名与可选值供用户纠正。"""
+    choice = re.match(r"argument (.+?): invalid choice: (.*?) \(choose from (.*)\)$", message)
+    if choice:
+        argument, value, choices = choice.groups()
+        if argument == "command":
+            return "没有这个子命令，可用的是：%s。请从中选一个。" % "、".join(SUBCOMMANDS)
+        return "参数 %s 的值不对：%s。可用的是：%s。请改用其中一个值。" % (argument, value, choices)
+    if message.startswith("unrecognized arguments: "):
+        return "这个参数放错位置了：%s。请检查拼写与位置，用 -h 查看参数。" % message.split(": ", 1)[1]
+    if message.startswith("the following arguments are required: "):
+        return "少了必填参数：%s。请补齐后重试。" % message.split(": ", 1)[1]
+    expected = re.match(r"argument (.+?): expected one argument$", message)
+    if expected:
+        return "这个选项后面要跟一个值：%s。请补上值后重试。" % expected.group(1)
+    return "参数用法有误：%s。请用 -h 查看参数。" % message
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        self.exit(2, "错误：%s\n" % _argparse_zh(message))
+
+
+class _HelpZh(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(USAGE_ZH)
+        parser.exit()
+
+
 def build_parser():
-    p = argparse.ArgumentParser(prog="redpen.py", description="red-pen 红笔改稿脚本")
-    p.add_argument("--root", default=".", help="工作区根目录（默认当前目录，其下是 drafts/<slug>/）")
+    p = Parser(prog="redpen.py", description="red-pen 红笔改稿脚本", add_help=False)
+    p.add_argument("-h", "--help", action=_HelpZh, nargs=0, help="查看中文用法")
+    p.add_argument("--root", default=None, help="工作区根目录（默认当前目录，其下是 drafts/<slug>/）")
     sub = p.add_subparsers(dest="command")
 
-    sub.add_parser("doctor", help="查看本机环境与工作区")
+    def add(name, helptext):
+        one = sub.add_parser(name, help=helptext)
+        one.add_argument("--root", dest="sub_root", default=argparse.SUPPRESS,
+                         help="工作区根目录（也可写在子命令前面）")
+        return one
 
-    i = sub.add_parser("init", help="收一份稿子建工作区；同名再跑一次算新版本")
+    add("doctor", "查看本机环境与工作区")
+
+    i = add("init", "收一份稿子建工作区；正文与后缀没变就不升版本")
     i.add_argument("slug")
     i.add_argument("--from", dest="source", required=True, help="稿子文件（.md / .html / .txt / .docx）；给 - 表示从标准输入收稿")
     i.add_argument("--lang", choices=LANGS, help="批语语言（默认 zh）")
 
-    b = sub.add_parser("brief", help="写入给谁看 / 要达到什么 / 最怕什么")
+    b = add("brief", "写入给谁看 / 要达到什么 / 最怕什么")
     b.add_argument("action", choices=("set",))
     b.add_argument("slug")
     b.add_argument("--from", dest="source", required=True, help="brief 的 JSON 文件")
@@ -1150,7 +1204,7 @@ def build_parser():
                            ("stats", "锚定率、等级分布、与上一版的对比"),
                            ("check", "离线复核整个工作区"),
                            ("export", "导出脱敏证据")):
-        one = sub.add_parser(name, help=helptext)
+        one = add(name, helptext)
         one.add_argument("slug", help="工作区 slug，或直接给工作区目录")
     return p
 
@@ -1167,9 +1221,14 @@ def main(argv=None):
                 "context": cmd_context, "review": cmd_review, "stats": cmd_stats,
                 "check": cmd_check, "export": cmd_export}
     if not args.command:
-        parser.print_help()
+        print(USAGE_ZH)
         return 2
     try:
+        inner = getattr(args, "sub_root", None)
+        top = args.root
+        if inner is not None and top is not None and os.path.abspath(inner) != os.path.abspath(top):
+            raise UsageError("--root 给了两次而且不一样，只能给一个工作区。")
+        args.root = inner or top or "."
         return handlers[args.command](args)
     except UsageError as e:
         print("错误：%s" % e, file=sys.stderr)

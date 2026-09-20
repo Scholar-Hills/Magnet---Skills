@@ -28,7 +28,7 @@ allowed-tools: Bash, Read, Write, Edit
    **七处都找不到就立即停止**，告诉用户「这份 Skill 的改稿脚本缺失，请重新下载完整目录」。**任何情况下都不要自己写一个替代脚本**，也不要「先手工批一版」——手写的批注没有锚定与闸门，会把钉不住的引文当成原文摆给用户看，那正是这份 Skill 存在的理由。
 1. 运行 `python3 "$REDPEN" doctor`。`python3` 不存在就试 `python`（Windows 常见）；两个都没有，告诉用户先装 Python 3.8+，不要继续。
 2. 稿子都放在**当前工作区**（用户项目或文稿目录，不是 Skill 目录）的 `drafts/` 下。第一次收稿前先 `pwd` 看一眼：如果当前目录是家目录、桌面或其它不像工作目录的地方，先问用户一句「稿子和批注我打算放在 `<当前路径>/drafts/`，可以吗？想换个地方现在告诉我」。定下来之后就别再换——同一篇稿子的历轮批注要在同一处才比得出来。
-3. **`--root` 是顶层选项，必须写在子命令前面**：`python3 "$REDPEN" --root <工作区> review <slug>` 对，`… review <slug> --root <工作区>` 会报错。默认值是当前目录，所以只要你已经 `cd` 进工作区，就不用加这个选项。子命令的位置参数也别写反：`brief set <slug> --from <文件>`（`set` 在 slug 前面），`init <slug> --from <稿子>`。
+3. **`--root` 写在子命令前面或后面都认，建议只给一次**：`python3 "$REDPEN" --root <工作区> review <slug>` 与 `… review <slug> --root <工作区>` 都可以。前后各给一次时，按当前目录转成绝对路径后相同才接受，不同则退出 2。默认值是当前目录，所以只要你已经 `cd` 进工作区，就不用加这个选项。子命令的位置参数也别写反：`brief set <slug> --from <文件>`（`set` 在 slug 前面），`init <slug> --from <稿子>`。
 4. 第一次用之前，翻一眼 Skill 目录里 `examples/drafts/newsletter-01/` 这个示例工作区：`inbox/marks.json` 是提交的样子，`marks.json` 是过闸之后的样子，`review.html` 是交付的样子。照着它写比照着文字描述不容易出错。
 
 **回复语言跟随用户**：用户用中文就全程中文，用英文就全程英文，不要中英混着来。这与 `brief.json` 里的 `lang` 是两件事——`lang` 指的是写进批注里的语言。
