@@ -42,7 +42,7 @@ NOTE_MIN = 6                  # 单条批语字数下限（unit_len 口径）
 MIN_ANCHORED = 0.7            # 锚定率门槛
 FIX_MAX_RATIO = 3             # 单条 fix 相对引文的长度上限倍数
 FIX_MIN_UNITS = 20            # 单条 fix 预算的地板：短引文也要写得完一句话
-FIX_MAX_UNITS = 40            # 单条 fix 预算的天花板：引一整段也不许还一整段
+FIX_MAX_UNITS = 40            # 单条 fix 预算的天花板：限制长建议，不能替代不代笔的纪律
 FIX_TOTAL_RATIO = 0.5         # fix 合计相对全稿的长度上限比例
 FIX_TOTAL_MIN_UNITS = 60      # fix 合计预算的地板：短稿上几条正常改法不该被顶掉
 FRONT_RATIO = 0.2             # 覆盖闸：引文全落在这个比例之前就提醒
@@ -187,7 +187,7 @@ def fix_budget(quote_units):
     """单条 fix 的字数预算：引文的三倍，夹在地板与天花板之间。
 
     地板保住英文短引文（「Hi Dana,」只有 2 个字，三倍写不完一句话），
-    天花板堵住「引一整段就能还一整段」那条路。
+    天花板限制长建议，不能识别所有整段重写，仍须遵守不代笔的纪律。
     """
     return min(max(FIX_MAX_RATIO * quote_units, FIX_MIN_UNITS), FIX_MAX_UNITS)
 
@@ -618,6 +618,31 @@ def archive_version(ws):
     return n
 
 
+DRAFT_WARN_CHARS = 50000      # 收稿提示阈值，按抽取文本字符数，不是闸门
+STDIN_MARK = "-"
+
+
+def _size_phrase(text):
+    """已抽成纯文本的正文规模，沿用第 5 节的唯一主尺。"""
+    return "正文 %d 字（汉字按字、英文按词，标点不算）" % unit_len(text)
+
+
+def _source_label(path):
+    """来源只显示文件名；标准输入使用统一标记。"""
+    return "（标准输入）" if path == STDIN_MARK else os.path.basename(path)
+
+
+def _intake_notes(source, ext, text, extra):
+    """返回收稿提示行；extra 接收收稿层的附加提示，不在这里打印。"""
+    lines = ["收进来：%s → %s%s" % (_source_label(source), DRAFT_STEM, ext)]
+    lines.extend(extra)
+    if len(text) >= DRAFT_WARN_CHARS:
+        lines.append("这份稿子很长：%s —— 一轮最多 %d 条批注，红笔页会很难读，建议先切成一节一节地批。"
+                     % (_size_phrase(anchor.plain_text(text)), MARKS_MAX))
+        lines.append("如果你也装了段级评审那个技能，可以先用它定位最弱的一段，再把那一段单独送进来。")
+    return lines
+
+
 def cmd_init(args):
     slug = check_slug(args.slug)
     root = os.path.abspath(args.root)
@@ -625,6 +650,23 @@ def cmd_init(args):
     text, ext = load_source(args.source)
     if not text.strip():
         raise UsageError("这份稿子是空的：%s" % _shown(args.source))
+    current = draft_path(ws) if os.path.isdir(ws) else None
+    if current and os.path.splitext(current)[1] == ext and read_text(current) == text:
+        if args.lang:
+            brief = read_brief(ws)
+            lang_changed = brief["lang"] != args.lang
+            if lang_changed or not os.path.isfile(os.path.join(ws, BRIEF_NAME)):
+                brief["lang"] = args.lang
+                write_json(os.path.join(ws, BRIEF_NAME), brief)
+                print("批语语言已写入 brief：%s。" % args.lang)
+                if lang_changed:
+                    print("brief 进 context_hash，旧批注作废，请重跑 context。")
+        print("稿子和第 %d 版逐字相同，没有收成新版本 —— marks.json 与 review.html 都留在原地。"
+              % version_of(ws))
+        print("下一步：context %s → 写 %s → review %s。"
+              % (slug, os.path.join(INBOX_DIR, MARKS_NAME), slug))
+        print("确实改过稿就核对一下 --from 指的是不是新文件。")
+        return 0
     archived = archive_version(ws) if os.path.isdir(ws) else None
     for sub in (INBOX_DIR, HISTORY_DIR):
         os.makedirs(os.path.join(ws, sub), exist_ok=True)
@@ -641,16 +683,17 @@ def cmd_init(args):
     brief = read_brief(ws)
 
     version = version_of(ws)
-    words = unit_len(anchor.plain_text(text))
     if archived:
         print("收到新一版稿子：%s（第 %d 版），上一版已归入 %s。"
               % (slug, version, os.path.join(HISTORY_DIR, "v%d" % archived)))
     else:
-        print("建好工作区：%s（第 %d 版）→ %s" % (slug, version, _shown(ws)))
-    line = "稿子：%s%s · 正文 %d 字（汉字按字、英文按词，标点不算）" % (DRAFT_STEM, ext, words)
+        print("建好工作区：%s（第 %d 版）→ %s" % (slug, version, os.path.join(DRAFTS_DIR, slug)))
+    line = "稿子：%s%s · %s" % (DRAFT_STEM, ext, _size_phrase(anchor.plain_text(text)))
     if had_brief or args.lang:
         line += " · 批语语言 %s" % brief["lang"]
     print(line)
+    for note in _intake_notes(args.source, ext, text, []):
+        print(note)
     if not brief["audience"] and not brief["purpose"]:
         print("下一步：先问清给谁看、要达到什么、最怕什么，写成 JSON 后跑 brief set %s --from <文件>；"
               "然后 context %s → 写 %s → review %s。"

@@ -47,7 +47,7 @@ allowed-tools: Bash, Read, Write, Edit
 python3 scripts/redpen.py init <slug> --from <稿子文件>
 ```
 
-`<slug>` 用小写英文加两位序号，能看出是哪篇（如 `newsletter-01`）。同一篇稿子的新版本用**同一个 slug 再跑一次** `init`，脚本会把上一版整个归进 `history/v<N>/`。
+`<slug>` 用小写英文加两位序号，能看出是哪篇（如 `newsletter-01`）。同一篇稿子的新版本用**同一个 slug 再跑一次** `init`，脚本会把上一版整个归进 `history/v<N>/`。稿子没改就跑不出新版本，脚本会直接说（目标后缀也须相同）。
 
 `.docx` 只读得到文字段落：表格按段落读出来、表结构会丢，文本框里的文字按位置读一次，图片与修订痕迹读不了。收到 docx 时把这句告诉用户，别让他以为改到了图里的字。
 
@@ -59,7 +59,7 @@ python3 scripts/redpen.py init <slug> --from <稿子文件>
 2. **要达到什么？**——读完之后你希望他做什么、记住什么、改变什么看法？
 3. **最怕什么？**——最怕被读成什么样（推销、说教、含糊、没依据）？
 
-三个问题一次问完，不要一条一条挤牙膏。答案写成 JSON 交进去：
+三个问题一次问完，不要一条一条挤牙膏。`init` 不会替你猜批语语言，按用户要求把 `lang` 写进 brief。答案写成 JSON 交进去：
 
 ```
 python3 scripts/redpen.py brief set <slug> --from <brief.json>

@@ -1007,6 +1007,8 @@ def t_init_long_draft_warn():
         check(rc == 0, "长短稿都应收进来，rc=%d\n%s%s" % (rc, out, err))
         check(("一轮最多 30 条批注" in out) == warned,
               "%d 字稿子的长稿提醒应为 %s：\n%s" % (size, warned, out))
+        check(out.count("正文") == (2 if warned else 1),
+              "长稿应在摘要与提醒各报一次正文，短稿只报一次：\n%s" % out)
 
 
 def t_init_same_draft_no_new_version():
