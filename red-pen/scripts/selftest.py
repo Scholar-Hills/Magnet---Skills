@@ -696,6 +696,76 @@ def t_stats_diff():
     check("锚定率" in out, "stats 应当给出锚定率：\n%s" % out)
 
 
+def t_stats_skips_unanchored():
+    """上一版从未钉住的引文不算作本轮消失。"""
+    root = workspace()
+    missing = "不存在的紫色月亮在星期九升起来了"
+    marks = marks_ok() + [{"quote": missing, "level": "minor",
+                           "note": "这条合成引文从未出现在稿子里。"}]
+    rc, out, err = submit(root, marks)
+    check(rc == 0, "第一版六条应通过，rc=%d\n%s%s" % (rc, out, err))
+    src = os.path.join(root, "source", "draft-v2.md")
+    write(src, DRAFT_V2)
+    rc, out, err = run(root, "init", SLUG, "--from", src)
+    check(rc == 0, "新稿应收成第二版：\n%s%s" % (out, err))
+    rc, out, err = submit(root, marks_ok()[:3])
+    check(rc == 0, "第二版应通过，rc=%d\n%s%s" % (rc, out, err))
+    rc, out, err = run(root, "stats", SLUG)
+    check(rc == 0, "stats 应退出 0：\n%s%s" % (out, err))
+    check("钉住的 5 条" in out and "有 2 条" in out and "不参与这次比较" in out,
+          "只比五条已钉住的，恰好消失两条：\n%s" % out)
+    check(missing[:12] not in out, "从未定位的引文不能进消失清单：\n%s" % out)
+
+
+def t_stats_refuses_stale():
+    """brief 变化后 check 与 stats 都拒收，stats 不带出旧数字。"""
+    root = workspace()
+    rc, out, err = submit(root, marks_ok())
+    check(rc == 0, "review 应通过：\n%s%s" % (out, err))
+    rc, out, err = run(root, "stats", SLUG)
+    check(rc == 0 and "锚定率" in out, "新鲜结果应报数字：\n%s%s" % (out, err))
+    set_brief(root, dict(BRIEF_V1, audience="第一次参加周会的新同事"))
+    rc, out, err = run(root, "check", SLUG)
+    check(rc == 1, "brief 改过后 check 应退 1：\n%s%s" % (out, err))
+    rc, out, err = run(root, "stats", SLUG)
+    check(rc == 1 and "作废" in out and "别再拿它截图" in out,
+          "stats 应只给作废与重做办法，rc=%d\n%s%s" % (rc, out, err))
+    check("锚定率" not in out and "等级：" not in out,
+          "作废时不许夹带旧数字：\n%s" % out)
+
+
+def t_stats_history():
+    """三份不同稿件各留一轮快照，按时间顺序展示，缺快照也能正常返回。"""
+    root = workspace()
+    for version, text in enumerate((DRAFT_V1, DRAFT_V2,
+                                    DRAFT_V2 + "\n本轮另附一份记录索引。\n"), 1):
+        if version > 1:
+            src = os.path.join(root, "source", "draft-v%d.md" % version)
+            write(src, text)
+            rc, out, err = run(root, "init", SLUG, "--from", src)
+            check(rc == 0, "第 %d 版 init 失败：\n%s%s" % (version, out, err))
+        rc, out, err = submit(root, marks_ok() if version == 1 else marks_ok()[:3])
+        check(rc == 0, "第 %d 版 review 失败：\n%s%s" % (version, out, err))
+    rc, out, err = run(root, "stats", SLUG)
+    check(rc == 0 and "留档 3 份" not in out, "不加开关不得展开走势：\n%s%s" % (out, err))
+    rc, out, err = run(root, "stats", SLUG, "--history")
+    check(rc == 0 and "留档 3 份" in out and "按引文逐字对齐" in out,
+          "应展示三轮留档及口径：\n%s%s" % (out, err))
+    lines = [ln for ln in out.splitlines() if ln.startswith("第 ") and "当前稿里还剩" in ln]
+    check(len(lines) == 3, "走势行应恰好三行：\n%s" % out)
+    for n, line in enumerate(lines, 1):
+        check(line.startswith("第 %d 轮 · 第 %d 版 · " % (n, n)),
+              "三份稿子必须不同，轮次和版本须按顺序：%s" % line)
+    hist = os.path.join(ws_dir(root), "history")
+    for name in os.listdir(hist):
+        if redpen.SNAPSHOT_RE.match(name):
+            os.remove(os.path.join(hist, name))
+    rc, out, err = run(root, "stats", SLUG, "--history")
+    check(rc == 0 and "还没有留档" in out, "缺留档应说明并退出 0：\n%s%s" % (out, err))
+    check(len([ln for ln in out.splitlines() if ln.startswith("第 ") and "当前稿里还剩" in ln]) == 0,
+          "缺留档不能造出走势行：\n%s" % out)
+
+
 def t_review_html():
     """红笔页自带样式：有锚点、没有任何外链。"""
     root = workspace()
@@ -1751,6 +1821,9 @@ SELFTESTS = (
     t_no_rewrite,
     t_history_append_only,
     t_stats_diff,
+    t_stats_skips_unanchored,
+    t_stats_refuses_stale,
+    t_stats_history,
     t_review_html,
     t_check_examples,
     t_check_tamper,

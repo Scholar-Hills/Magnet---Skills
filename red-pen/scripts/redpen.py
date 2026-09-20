@@ -1091,9 +1091,61 @@ def previous_record(ws):
     return (n, read_json(path)) if os.path.isfile(path) else (n, None)
 
 
+def stale_reasons(ws, record, raw, brief, draft, with_hash=True):
+    """只查新鲜度；check 用 with_hash=False，让 _gate_hash 单独报上下文作废。"""
+    reasons = []
+    if record.get("draft_sha256") != sha256_text(raw):
+        reasons.append("marks.json 记的稿子哈希与现在的 %s 对不上：稿子改过了，请重跑 context 与 review。"
+                       % os.path.basename(draft))
+    elif with_hash and context_hash(anchor.extract(raw).text, brief) != record.get("context_hash"):
+        reasons.append("marks.json 记的 context_hash 与当前稿子加 brief 算出来的对不上：brief 改过了，请重跑 context 与 review。")
+    if record.get("version") != version_of(ws):
+        reasons.append("marks.json 记的是第 %s 版，工作区现在是第 %d 版。"
+                       % (record.get("version"), version_of(ws)))
+    return reasons
+
+
+def read_snapshots(ws):
+    """按留档文件名依次读取各轮记录；不写回，也不改历史。"""
+    hist = os.path.join(ws, HISTORY_DIR)
+    if not os.path.isdir(hist):
+        return []
+    return [read_json(os.path.join(hist, name)) for name in sorted(os.listdir(hist))
+            if SNAPSHOT_RE.match(name)]
+
+
+def say_history(ws, raw, snaps):
+    if not snaps:
+        print("history/ 里还没有留档，看不出走势。")
+        return
+    print("留档 %d 份，按引文逐字对齐，不是同一条批注的身份——仍使用规范化与头尾锚定兜底，改过字也可能找得到；消失不等于问题解决。" % len(snaps))
+    ex = anchor.extract(raw)
+    for round_no, snap in enumerate(snaps, 1):
+        marks = snap.get("marks") or []
+        counts = snap.get("level_counts") or level_counts(marks)
+        levels = " / ".join("%s %d" % (anchor.LEVEL_LABEL[lv], counts.get(lv, 0))
+                            for lv in anchor.LEVELS)
+        pinned = [m for m in marks if m.get("anchored")]
+        remaining = sum(1 for m in pinned if anchor.locate(ex, m.get("quote") or "") is not None)
+        print("第 %d 轮 · 第 %s 版 · %s · 批注 %d 条 · 钉住 %d 条 · %s · 当前稿里还剩 %d 条"
+              % (round_no, snap.get("version"), snap.get("at"), len(marks),
+                 len(pinned), levels, remaining))
+
+
 def cmd_stats(args):
     ws, slug = resolve(args.root, args.slug)
     record = read_record(ws)
+    draft = require_draft(ws)
+    raw = read_text(draft)
+    brief = read_brief(ws)
+    stale = stale_reasons(ws, record, raw, brief, draft, with_hash=True)
+    if stale:
+        print("[作废] 这个工作区的结果已经作废，下面的数字都不作数，所以一个都不打：")
+        for reason in stale:
+            print("    - %s" % reason)
+        print("按这三步重来：1) context %s 拿新的上下文包；2) 照新的 draft_text 重写 inbox/marks.json；3) review %s。" % (slug, slug))
+        print("磁盘上的 review.html 是上一轮渲染的，别再拿它截图。")
+        return 1
     marks = record.get("marks") or []
     anchored = sum(1 for m in marks if m.get("anchored"))
     print("%s（第 %d 版，%s）" % (slug, record.get("version", 1), record.get("at", "")))
@@ -1103,6 +1155,18 @@ def cmd_stats(args):
     with_fix = sum(1 for m in marks if m.get("fix"))
     print("给了改法的 %d 条，只指方向的 %d 条。" % (with_fix, len(marks) - with_fix))
 
+    partial = partial_line(marks)
+    if partial is not None:
+        print(partial)
+    ex = anchor.extract(raw)
+    missed = [m for m in marks if not m.get("anchored")]
+    if missed:
+        print("有 %d 条没能定位，下面这几行原样念给用户：" % len(missed))
+        for line in missed_lines(ex, marks):
+            print(line)
+    if args.history:
+        say_history(ws, raw, read_snapshots(ws))
+
     n, prev = previous_record(ws)
     if n is None:
         print("这是第 1 版，还没有可比的上一版。")
@@ -1110,15 +1174,19 @@ def cmd_stats(args):
     if prev is None:
         print("上一版（第 %d 版）没有留下通过闸门的批注，无从比较。" % n)
         return 0
-    ex = anchor.extract(read_text(require_draft(ws)))
     old = prev.get("marks") or []
-    gone = [m for m in old if anchor.locate(ex, m.get("quote") or "") is None]
-    print("与上一版（第 %d 版）对比：上一版 %d 条批注里有 %d 条在新稿里消失了。"
-          % (n, len(old), len(gone)))
+    pinned = [m for m in old if m.get("anchored")]
+    loose = [m for m in old if not m.get("anchored")]
+    gone = [m for m in pinned if anchor.locate(ex, m.get("quote") or "") is None]
+    print("与上一版（第 %d 版）对比：上一版钉住的 %d 条批注里有 %d 条在新稿里消失了。"
+          % (n, len(pinned), len(gone)))
     for m in gone:
         print("    %s：%s" % (anchor.LEVEL_LABEL.get(m.get("level"), "提示"), _cut(m.get("quote"), 50)))
     if not gone:
-        print("上一版的批注在新稿里都还在 —— 要么还没改，要么改动没碰到这些句子。")
+        print("上一版钉住的批注在新稿里都还在 —— 要么还没改，要么改动没碰到这些句子。")
+        print("也可能句子改过但仍被规范化或头尾锚定找到，不能据此认定没有改动。")
+    if loose:
+        print("另有 %d 条上一版就没能定位，不参与这次比较——它们从来没钉在稿子上，「消失」说不上。" % len(loose))
     return 0
 
 
@@ -1145,12 +1213,7 @@ def cmd_check(args):
     record = read_json(record_file)
     marks = record.get("marks") or []
 
-    if record.get("draft_sha256") != sha256_text(raw):
-        errors.append("marks.json 记的稿子哈希与现在的 %s 对不上：稿子改过了，请重跑 context 与 review。"
-                      % os.path.basename(draft))
-    if record.get("version") != version_of(ws):
-        errors.append("marks.json 记的是第 %s 版，工作区现在是第 %d 版。"
-                      % (record.get("version"), version_of(ws)))
+    errors.extend(stale_reasons(ws, record, raw, brief, draft, with_hash=False))
 
     payload = {"context_hash": record.get("context_hash"),
                "marks": [dict((k, m[k]) for k in MARK_KEYS if k in m) for m in marks]}
@@ -1456,11 +1519,13 @@ def build_parser():
 
     for name, helptext in (("context", "输出上下文包 JSON"),
                            ("review", "跑闸门并锚定批注，写红笔页"),
-                           ("stats", "锚定率、等级分布、与上一版的对比"),
                            ("check", "离线复核整个工作区"),
                            ("export", "导出脱敏证据")):
         one = add(name, helptext)
         one.add_argument("slug", help="工作区 slug，或直接给工作区目录")
+    s = add("stats", "锚定率、等级分布、与上一版的对比")
+    s.add_argument("slug", help="工作区 slug，或直接给工作区目录")
+    s.add_argument("--history", action="store_true", help="逐份读 history/review-*.json，看多版走势")
     return p
 
 
