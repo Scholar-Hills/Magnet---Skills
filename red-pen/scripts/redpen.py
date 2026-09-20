@@ -36,12 +36,17 @@ import anchor
 # ---- 闸门常量（改这里必须同步改 references/workspace-format.md 与 selftest.py）
 MARKS_MIN = 1                 # 批注条数下限
 MARKS_MAX = 30                # 批注条数上限
-QUOTE_MAX = 200               # 单条引文字数上限
-NOTE_MIN = 6                  # 单条批语字数下限
+QUOTE_MAX = 200               # 单条引文字数上限（unit_len 口径）
+QUOTE_MAX_CHARS = 400         # 单条引文原串字符硬顶（字数闸之外再兜一道）
+NOTE_MIN = 6                  # 单条批语字数下限（unit_len 口径）
 MIN_ANCHORED = 0.7            # 锚定率门槛
 FIX_MAX_RATIO = 3             # 单条 fix 相对引文的长度上限倍数
+FIX_MIN_UNITS = 20            # 单条 fix 预算的地板：短引文也要写得完一句话
+FIX_MAX_UNITS = 40            # 单条 fix 预算的天花板：引一整段也不许还一整段
 FIX_TOTAL_RATIO = 0.5         # fix 合计相对全稿的长度上限比例
+FIX_TOTAL_MIN_UNITS = 60      # fix 合计预算的地板：短稿上几条正常改法不该被顶掉
 FRONT_RATIO = 0.2             # 覆盖闸：引文全落在这个比例之前就提醒
+FRONT_MIN_BLOCKS = 3          # 覆盖闸的前提：稿子不足这么多块就无从谈起
 
 # ---- 目录与文件名
 DRAFTS_DIR = "drafts"
@@ -133,6 +138,66 @@ def _pct(ratio):
 def _cut(text, width=40):
     text = " ".join(str(text).split())
     return text if len(text) <= width else text[:width] + "…"
+
+
+# ---------------------------------------------------------------- 字数口径
+
+# 全库只有这一把尺：闸门的分子分母、init 的字数行都走 unit_len，绝不再写第二个 CJK 检测器。
+_CJK_RANGES = (
+    (0x3040, 0x30FF),        # 假名
+    (0x3400, 0x4DBF),        # 汉字扩展 A
+    (0x4E00, 0x9FFF),        # 汉字基本区
+    (0xAC00, 0xD7A3),        # 谚文音节
+    (0xF900, 0xFAFF),        # 汉字兼容区
+    (0x20000, 0x2FA1F),      # 汉字扩展 B 及以后
+)
+
+
+def _is_cjk(ch):
+    code = ord(ch)
+    for lo, hi in _CJK_RANGES:
+        if lo <= code <= hi:
+            return True
+    return False
+
+
+def unit_len(s):
+    """字数：汉字假名谚文逐字计，连着的字母数字算一个单位，标点与空白不计。
+
+    CJK 那一支必须排在 isalnum() 之前 —— 汉字的 isalnum() 也为真，反过来写会把
+    一串汉字算成一个单位。CJK 字符本身也断开连写，「三栏abc」是 3 + 1 个单位。
+    这把尺对规范化不敏感：折叠空白、归一引号都不改变数出来的值。
+    """
+    units = 0
+    run = False                              # 上一个字符是不是字母数字连写的一部分
+    for ch in s:
+        if _is_cjk(ch):
+            units += 1
+            run = False
+        elif ch.isalnum():
+            if not run:
+                units += 1
+            run = True
+        else:
+            run = False
+    return units
+
+
+def fix_budget(quote_units):
+    """单条 fix 的字数预算：引文的三倍，夹在地板与天花板之间。
+
+    地板保住英文短引文（「Hi Dana,」只有 2 个字，三倍写不完一句话），
+    天花板堵住「引一整段就能还一整段」那条路。
+    """
+    return min(max(FIX_MAX_RATIO * quote_units, FIX_MIN_UNITS), FIX_MAX_UNITS)
+
+
+def total_fix_budget(draft_units):
+    """全篇 fix 合计的字数预算：稿子的一半，短稿另有一道地板。
+
+    地板只放松短稿那一侧 —— 长稿走的仍是比例，几百字的稿子不会因此多出额度。
+    """
+    return max(int(draft_units * FIX_TOTAL_RATIO), FIX_TOTAL_MIN_UNITS)
 
 
 # ---------------------------------------------------------------- 工作区
@@ -354,9 +419,12 @@ def _gate_fix(idx, quote, fix):
     bare_quote, bare_fix = anchor.normalize(quote), anchor.normalize(fix)
     if bare_fix == bare_quote:
         errors.append("第 %d 条的 fix 与引文规范化后完全相同，那不是改法。" % idx)
-    if bare_quote and len(bare_fix) > FIX_MAX_RATIO * len(bare_quote):
-        errors.append("第 %d 条的 fix 有 %d 字，超过引文 %d 字的三倍：给方向就够，整段重写不是批注。"
-                      % (idx, len(bare_fix), len(bare_quote)))
+    q_units, f_units = unit_len(bare_quote), unit_len(bare_fix)
+    budget = fix_budget(q_units)
+    if bare_quote and f_units > budget:
+        errors.append("第 %d 条的 fix 有 %d 字，超过预算 %d 字（引文 %d 字 × %d，最少 %d 字、最多 %d 字）："
+                      "给方向就够，整段重写不是批注。"
+                      % (idx, f_units, budget, q_units, FIX_MAX_RATIO, FIX_MIN_UNITS, FIX_MAX_UNITS))
     return errors
 
 
@@ -374,11 +442,15 @@ def _gate_one(idx, item):
     note = str(item.get("note") or "").strip()
     if not quote:
         errors.append("第 %d 条的引文是空的：批注必须指向原文里的某一句。" % idx)
-    elif len(quote) > QUOTE_MAX:
+    elif unit_len(quote) > QUOTE_MAX:
         errors.append("第 %d 条的引文有 %d 字，超过 %d 字上限：引一句就够，不要整段抄。"
-                      % (idx, len(quote), QUOTE_MAX))
-    if len(note) < NOTE_MIN:
-        errors.append("第 %d 条的批语只有 %d 字，至少 %d 字才说得清问题。" % (idx, len(note), NOTE_MIN))
+                      % (idx, unit_len(quote), QUOTE_MAX))
+    elif len(quote) > QUOTE_MAX_CHARS:
+        errors.append("第 %d 条的引文有 %d 个字符，超过 %d 字符硬顶：引一句就够，不要整段抄。"
+                      % (idx, len(quote), QUOTE_MAX_CHARS))
+    if unit_len(note) < NOTE_MIN:
+        errors.append("第 %d 条的批语只有 %d 字，至少 %d 字才说得清问题。"
+                      % (idx, unit_len(note), NOTE_MIN))
     tidy["quote"] = quote
     tidy["note"] = note
     if item.get("level") is not None:
@@ -408,11 +480,14 @@ def _gate_duplicate(marks):
 
 
 def _gate_no_rewrite(draft_text, marks):
-    total = sum(len(m["fix"]) for m in marks if m.get("fix"))
-    if total <= len(draft_text) * FIX_TOTAL_RATIO:
+    total = sum(unit_len(m["fix"]) for m in marks if m.get("fix"))
+    draft_units = unit_len(draft_text)
+    budget = total_fix_budget(draft_units)
+    if total <= budget:
         return []
-    return ["fix 合计 %d 字，超过全稿 %d 字的一半：这是重写不是批注，请只在关键处给改法。"
-            % (total, len(draft_text))]
+    return ["fix 合计 %d 字，超过预算 %d 字（全稿 %d 字的一半，短稿至少给到 %d 字）："
+            "这是重写不是批注，请只在关键处给改法。"
+            % (total, budget, draft_units, FIX_TOTAL_MIN_UNITS)]
 
 
 def _warn_brief(brief):
@@ -456,6 +531,8 @@ def gate_anchored(result):
              % (_pct(result.anchored_ratio),
                 sum(1 for m in result.marks if m.get("anchored")), len(result.marks),
                 _pct(MIN_ANCHORED))]
+    if len(result.marks) - 1 < MIN_ANCHORED * len(result.marks):
+        lines.append("    条数少的时候一条钉不住就等于整份不过：回原文把那一条重抄一遍就行，不必删条凑比例。")
     for m in result.marks:
         if m.get("anchored"):
             continue
@@ -464,8 +541,16 @@ def gate_anchored(result):
     return ["\n".join(lines)]
 
 
-def gate_coverage(result, html):
-    """引文全挤在开头：多半是没读完，提醒但不拦。"""
+def gate_coverage(result, html, blocks):
+    """引文全挤在开头：多半是没读完，提醒但不拦。稿子不足三块就无从谈起。
+
+    块数只认 `len(anchor.blocks(ex))`，不许改数换行符：带三处软换行的单段公告，
+    换行符计数会数成 4 块、提醒照旧会响——那正是这道闸要修的那类稿子，实测
+    `blocks()` 数出来是 1 块。块数这个量在「文字自带尾换行的 HTML 稿」上偏少
+    （见 anchor.blocks 的边界说明），偏少只会让提醒更沉默，不会误报。
+    """
+    if blocks < FRONT_MIN_BLOCKS:
+        return []
     starts = [m["start"] for m in result.marks if m.get("anchored") and "start" in m]
     if not starts or not html:
         return []
@@ -495,7 +580,7 @@ def run_gates(raw, brief, payload):
     if not errors:
         result = anchor.annotate(raw, tidy["marks"])
         errors.extend(gate_anchored(result))
-        warnings.extend(gate_coverage(result, ex.html))
+        warnings.extend(gate_coverage(result, ex.html, len(anchor.blocks(ex))))
         warnings.extend(warn_levels(result))
     return errors, warnings, tidy, result
 
@@ -546,7 +631,8 @@ def cmd_init(args):
     write_text(os.path.join(ws, DRAFT_STEM + ext), text)
 
     brief_file = os.path.join(ws, BRIEF_NAME)
-    if not os.path.isfile(brief_file):
+    had_brief = os.path.isfile(brief_file)
+    if not had_brief:
         write_json(brief_file, brief_template(args.lang or "zh"))
     elif args.lang:
         brief = read_brief(ws)
@@ -555,13 +641,16 @@ def cmd_init(args):
     brief = read_brief(ws)
 
     version = version_of(ws)
-    words = len(anchor.plain_text(text))
+    words = unit_len(anchor.plain_text(text))
     if archived:
         print("收到新一版稿子：%s（第 %d 版），上一版已归入 %s。"
               % (slug, version, os.path.join(HISTORY_DIR, "v%d" % archived)))
     else:
         print("建好工作区：%s（第 %d 版）→ %s" % (slug, version, _shown(ws)))
-    print("稿子：%s%s · 正文 %d 字 · 语言 %s" % (DRAFT_STEM, ext, words, brief["lang"]))
+    line = "稿子：%s%s · 正文 %d 字（汉字按字、英文按词，标点不算）" % (DRAFT_STEM, ext, words)
+    if had_brief or args.lang:
+        line += " · 批语语言 %s" % brief["lang"]
+    print(line)
     if not brief["audience"] and not brief["purpose"]:
         print("下一步：先问清给谁看、要达到什么、最怕什么，写成 JSON 后跑 brief set %s --from <文件>；"
               "然后 context %s → 写 %s → review %s。"

@@ -9,6 +9,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,10 @@ REDPEN = os.path.join(HERE, "redpen.py")
 PY = sys.executable
 SLUG = "weekly-note"
 MARKS_NAME = "marks.json"
+
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import redpen        # noqa: E402
 
 
 class Failed(Exception):
@@ -78,6 +83,82 @@ BRIEF_V1 = {
 
 LONG_QUOTE_A = "原来的模板要求每个人填满八栏，于是大家把力气花在填空上，真正值得说的那一两句反而被埋掉了。"
 LONG_QUOTE_B = "我们的做法是把长期项目单独挂一张看板，复盘只写这周有变化的部分，其余的留在看板上。"
+
+# 四行、行与行之间不留空行的家长群公告：正文 31 字、纯文本 34 字符、只有一块，
+# 而换行符数出来是 4 块 —— 短稿上两条地板与覆盖闸的块数前提都靠它验。
+DRAFT_NOTICE = """各位家长好
+本周五家长会改到晚上七点
+请提前十分钟进会议室
+辛苦大家
+"""
+
+# 六段英文邮件：第一块逐字是「Hi Dana,」（2 个字），第三块最长（646 字符），
+# 全稿只用 ASCII。收件人与署名都是虚构的短名。
+DRAFT_EN = """Hi Dana,
+
+Thanks for sending the draft on Tuesday. I read it twice, once quickly and once with a pen, and I wrote down the three places that cost a reader the most. The draft itself is yours to change; I have not rewritten anything.
+
+The middle section is where I lost the thread. It opens with the date change, moves to the budget, then comes back to the date two paragraphs later, and by that point I had forgotten which of the two dates was the one that moved. A reader skimming this on a phone will not scroll back to check. Put every date in one place, say plainly which one changed and which one did not, and only then explain why the change was needed. The reasons are the part you clearly care about most, and they land better once the reader is sure about the facts. Right now those facts are spread across four screens, with the same number written three different ways.
+
+The closing line does not ask for anything. It says the team can reach out with questions, which is true of every message ever sent. Name the one thing you want back, and give a date for it.
+
+One more thing on tone. The second half reads as an apology for a decision that, from everything here, was the right one. Say what changed and why, then stop.
+
+Thanks,
+Mo
+"""
+
+# 第四块里那句可以整句引的短句。
+EN_ASK = "Name the one thing you want back, and give a date for it."
+
+BRIEF_EN = {
+    "audience": "the colleague who wrote the draft and will revise it themselves",
+    "purpose": "point at the places that cost a reader the most and leave the rewriting to them",
+    "worries": ["reads like a rewrite", "too vague to act on"],
+    "lang": "en",
+}
+
+# 41 字的整句引文配 64 字的整段改法：改前 3×41=123 字符，放行；换尺之后落在天花板之外。
+CAP_QUOTE = "三栏之后只剩下三个问题：这周最意外的一件事、下周准备换的做法、需要别人帮忙的地方。"
+CAP_FIX = ("建议把这三个问题拆成三行分开写，每行前面加一个序号，再各补一句话说明这一栏要交代"
+           "什么，读的人扫一眼就知道该看哪一行，不用来回翻。")
+
+
+def notice_marks_ok():
+    """公告上三条各带一个 12 字改法的批注：合计 36 字。"""
+    return [
+        {"quote": "各位家长好", "level": "remark",
+         "note": "开头这一句没带任何信息，手机上第一眼看到的就是它。",
+         "fix": "改成「家长会时间有变了」"},
+        {"quote": "本周五家长会改到晚上七点", "level": "major",
+         "note": "改到几点写了，原来是几点没写，家长会自己去翻旧消息。",
+         "fix": "把新的时间单独放在第一行"},
+        {"quote": "请提前十分钟进会议室", "level": "minor",
+         "note": "提前十分钟到了之后去哪里等，这一句没有交代。",
+         "fix": "再补一句进不去时找谁开门"},
+    ]
+
+
+def notice_marks_over():
+    """公告上六条，引文互不重叠、改法各 10–13 字：合计 72 字，超过 60 字的地板。
+
+    每条改法都落在自己的预算之内（改前是引文的三倍，改后是 20 字地板），
+    所以响的只会是合计那一道闸。
+    """
+    return [
+        {"quote": "各位家长好", "level": "remark",
+         "note": "开头这一句没带任何信息。", "fix": "改成一句能一眼看见时间的话"},
+        {"quote": "本周五家长会", "level": "minor",
+         "note": "本周五和下周五在群里最容易看混。", "fix": "写清楚是本周五而不是下周五"},
+        {"quote": "改到晚上七点", "level": "major",
+         "note": "只写了改到几点，没写原来是几点。", "fix": "把原来的开会时间也写在旁边"},
+        {"quote": "请提前十分钟", "level": "minor",
+         "note": "提前十分钟到的人去哪里等着。", "fix": "说明早到的人可以在哪里等着"},
+        {"quote": "进会议室", "level": "minor",
+         "note": "哪一间会议室，通知里没有写。", "fix": "写明会议室在几楼几号"},
+        {"quote": "辛苦大家", "level": "remark",
+         "note": "结尾这一句可以换成一个动作。", "fix": "换成一句需不需要回复"},
+    ]
 
 
 def marks_ok():
@@ -314,7 +395,11 @@ def t_marks_count_bounds():
 
 
 def t_fix_rules():
-    """fix 不能等于原句、不能是三倍长的重写、也不能是空串。"""
+    """fix 不能等于原句、不能是超预算的重写、也不能是空串。
+
+    验的是新 §5 主尺下的单条改法预算（`fix_budget`：引文的三倍，夹在 20 字地板与
+    40 字天花板之间），不是原串字符数。
+    """
     root = workspace()
     same = marks_ok()[:2]
     same[0]["fix"] = same[0]["quote"]
@@ -324,10 +409,12 @@ def t_fix_rules():
 
     long_fix = marks_ok()[:2]
     long_fix[0]["fix"] = "这里应当换一种说法，把三栏各自负责什么讲清楚，再补一句为什么不是四栏。"
-    check(len(long_fix[0]["fix"]) > 3 * len(long_fix[0]["quote"]), "用例材料本身应当超过三倍")
+    check(redpen.unit_len(long_fix[0]["fix"])
+          > redpen.fix_budget(redpen.unit_len(long_fix[0]["quote"])),
+          "用例材料本身应当超预算")
     rc, out, err = submit(root, long_fix)
     check(rc == 1, "fix 超过 quote 三倍应退出 1，rc=%d\n%s%s" % (rc, out, err))
-    check("三倍" in out, "应当说明超过三倍：\n%s" % out)
+    check("预算" in out, "应当说明超过预算：\n%s" % out)
 
     empty = marks_ok()[:2]
     empty[0]["fix"] = ""
@@ -353,6 +440,7 @@ def t_anchor_ratio():
     check("0.6" in out or "60" in out, "应当报出实际锚定率：\n%s" % out)
     check("这句话稿子里根本没有出现过" in out and "另外一句同样不存在的引文" in out,
           "应当逐条列出未锚定的引文：\n%s" % out)
+    check("重抄" not in out, "条数够多时不该再补那句指路提示（反例见 t_few_marks_hint）：\n%s" % out)
     check(not os.path.exists(os.path.join(ws_dir(root), "review.html")),
           "闸门没过时不应写出 review.html")
 
@@ -374,7 +462,12 @@ def t_duplicate():
 
 
 def t_coverage_warn():
-    """引文全挤在开头 20%：提醒没读完，但不拦。"""
+    """引文全挤在开头 20%：提醒没读完，但不拦。
+
+    验的是新 §5 里覆盖闸那两条例外——比的是消毒后 HTML 里的起始偏移与 HTML 总长度
+    （`FRONT_RATIO`），不是纯文本偏移；且以块数 ≥ 3 为前提（DRAFT_FRONT 有 4 块，
+    不足三块的那一侧见 t_coverage_needs_three_blocks）。
+    """
     root = workspace(text=DRAFT_FRONT)
     front = [
         {"quote": "开头这一段是引子", "level": "remark", "note": "引子可以再短半句。"},
@@ -392,19 +485,38 @@ def t_coverage_warn():
 
 
 def t_no_rewrite():
-    """fix 加起来超过稿子一半：那是重写，不是批注。"""
+    """fix 加起来超过稿子一半：那是重写，不是批注。
+
+    验的是新 §5 主尺下的合计预算（`total_fix_budget`：全稿字数的一半，短稿另有 60 字
+    地板）。这颗牙的职责是证明新加的地板没有把长稿那一侧放松 —— 266 字的稿子走的是
+    133 的比例预算，不是 60 的地板；四条改法各 36–38 字，都落在自己的单条预算之内，
+    所以响的只会是合计那一道闸（短稿那一侧见 t_short_draft_budget）。
+    """
     root = workspace()
     text = context(root)["draft_text"]
-    filler = ("把这一段整体换成下面这版说法：先讲改之前是什么样子，再讲改之后是什么样子，"
-              "中间补一句我们当时是怎么决定的，最后留一句代价在那里，读者才知道要不要照着自己试一遍。")
     marks = [
-        {"quote": LONG_QUOTE_A, "level": "major", "note": "这一段建议整体重排。", "fix": filler},
-        {"quote": LONG_QUOTE_B, "level": "major", "note": "这一段也建议整体重排。", "fix": filler[:-1]},
+        {"quote": LONG_QUOTE_A, "level": "major",
+         "note": "这一段建议整体重排，改前改后各说一遍。",
+         "fix": "这一段建议先说改之前是什么样子，再说改之后是什么样子，中间补一句当时怎么定的"},
+        {"quote": LONG_QUOTE_B, "level": "major",
+         "note": "看板这一句只说了做法，没说边界在哪。",
+         "fix": "看板那一句建议写清楚哪些事留在看板上、哪些事仍要进复盘，再举一个上周真实的例子"},
+        {"quote": "上周我们把周会的复盘模板改短了，从八栏减到三栏。", "level": "minor",
+         "note": "开头这一句把结论和数字挤在一起了。",
+         "fix": "开头这一句可以把八栏与三栏各自的毛病列成两行对照，让读的人一眼看出少掉哪几栏"},
+        {"quote": "有同事说三栏装不下跨部门的事，容易漏掉需要长期跟进的项目。", "level": "minor",
+         "note": "跨部门这一条被压在段尾，容易被跳过。",
+         "fix": "跨部门这一条建议单独起一段，先写以前漏掉过什么事，再写现在靠哪一张看板接住它们"},
     ]
-    total = sum(len(m["fix"]) for m in marks)
-    check(total > len(text) * 0.5, "用例材料本身应当超过稿子一半：%d vs %d" % (total, len(text)))
+    total_units = sum(redpen.unit_len(m["fix"]) for m in marks)
+    budget = redpen.total_fix_budget(redpen.unit_len(text))
+    check(total_units > budget,
+          "用例材料本身应当超过合计预算：%d vs %d" % (total_units, budget))
+    check(budget > redpen.FIX_TOTAL_MIN_UNITS,
+          "这份稿子必须走比例预算而不是地板：%d vs %d" % (budget, redpen.FIX_TOTAL_MIN_UNITS))
     for m in marks:
-        check(len(m["fix"]) <= 3 * len(m["quote"]), "单条 fix 不该先被三倍闸拦下")
+        check(redpen.unit_len(m["fix"]) <= redpen.fix_budget(redpen.unit_len(m["quote"])),
+              "单条 fix 不该先被逐条预算闸拦下")
     rc, out, err = submit(root, marks)
     check(rc == 1, "fix 总量超过稿子一半应退出 1，rc=%d\n%s%s" % (rc, out, err))
     check("一半" in out or "50%" in out, "应当说明超过稿子一半：\n%s" % out)
@@ -563,6 +675,266 @@ def t_banned_scan():
           "banned_words.py 扫 Skill 目录应当无输出退出 0，rc=%d\n%s" % (proc.returncode, out))
 
 
+def t_unit_len_is_normalization_blind():
+    """字数口径：汉字逐字计、连着的字母数字算一个单位、标点空白不计，且对规范化不敏感。
+
+    这颗牙不起子进程，验的是那把尺本身。同一句话的三种写法（弯引号、全角空格、
+    多打空格）必须数出同一个值，也必须与规范化之后的值相同 —— 闸门的宽严不许随
+    排版微调漂移。末尾两端一致性把预算函数的地板与天花板一起钉住。
+    """
+    check(redpen.unit_len("Hi Dana,") == 2,
+          "英文两个词应当是 2 个字，实际 %r" % redpen.unit_len("Hi Dana,"))
+    check(redpen.unit_len("问不清楚的先不报") == 8,
+          "八个汉字应当是 8 个字，实际 %r" % redpen.unit_len("问不清楚的先不报"))
+    punct = "，。！？ 　“”"
+    check(redpen.unit_len(punct) == 0,
+          "纯标点空白串应当是 0 个字，实际 %r" % redpen.unit_len(punct))
+
+    plain = 'He said "we ship on Friday" and left.'
+    curly = 'He said “we ship on Friday” and left.'
+    wide = 'He said　"we ship on Friday"　and left.'
+    spaced = 'He  said   "we ship on Friday"   and left.'
+    sizes = [redpen.unit_len(s) for s in (plain, curly, wide, spaced)]
+    check(len(set(sizes)) == 1, "同一句话的三种写法应当数出同一个值，实际 %r" % sizes)
+    for s in (plain, curly, wide, spaced):
+        check(redpen.unit_len(redpen.anchor.normalize(s)) == sizes[0],
+              "规范化前后应当同一个值：%r → %d，期望 %d"
+              % (s, redpen.unit_len(redpen.anchor.normalize(s)), sizes[0]))
+
+    check(redpen.fix_budget(0) == redpen.FIX_MIN_UNITS == 20,
+          "引文为 0 字时单条预算应当落在地板 20，实际 %r" % redpen.fix_budget(0))
+    check(redpen.fix_budget(10 ** 6) == redpen.FIX_MAX_UNITS == 40,
+          "引文再长也不许超过天花板 40，实际 %r" % redpen.fix_budget(10 ** 6))
+    check(redpen.total_fix_budget(0) == redpen.FIX_TOTAL_MIN_UNITS == 60,
+          "空稿的合计预算应当落在地板 60，实际 %r" % redpen.total_fix_budget(0))
+
+
+def t_fix_budget_floor():
+    """英文短引文也要有写得完一句话的改法预算：单条预算的地板是 20 字。
+
+    改前实测：`[ERROR] 第 1 条的 fix 有 28 字，超过引文 8 字的三倍`，rc=1 ——
+    「Hi Dana,」规范化后是 8 个字符，三倍只有 24，一句 28 个字符（7 个词）的
+    建议就被逼着削成半句。换尺之后引文是 2 个字，3×2 落到地板 20，这条改法过得了。
+    """
+    root = workspace(text=DRAFT_EN, name="draft.txt", brief=BRIEF_EN)
+    marks = [
+        {"quote": "Hi Dana,", "level": "minor",
+         "note": "The greeting takes a whole line and then stalls before any ask.",
+         "fix": "Add a one-line ask under it."},
+        {"quote": EN_ASK, "level": "major",
+         "note": "This is the only sentence that tells the reader what to do next."},
+    ]
+    rc, out, err = submit(root, marks)
+    check(rc == 0, "英文短引文配一句可照抄的改法应当过闸，rc=%d\n%s%s" % (rc, out, err))
+
+
+def t_fix_budget_cap():
+    """引一整段就能还一整段的路要堵上：单条预算的天花板是 40 字。
+
+    材料是 41 字的整句引文配 64 字的整段改法：改前三倍闸的上限是 123 字符，当场
+    放行 rc=0 —— 这颗牙今天失败在 `check(rc == 1, …)` 那一行，那正是它要盯的洞。
+    """
+    root = workspace()
+    marks = [
+        {"quote": CAP_QUOTE, "level": "major",
+         "note": "三个问题挤在一句里，读的人得自己数着顿号拆。", "fix": CAP_FIX},
+        {"quote": "读的人反而记住了更多东西", "level": "minor",
+         "note": "结论下得很满，缺一个可核对的依据。"},
+    ]
+    cap_units, quote_units = redpen.unit_len(CAP_FIX), redpen.unit_len(CAP_QUOTE)
+    check(cap_units > redpen.FIX_MAX_UNITS,
+          "用例材料必须超过天花板 %d 字，否则验不到天花板，实际 %d 字"
+          % (redpen.FIX_MAX_UNITS, cap_units))
+    check(cap_units <= redpen.FIX_MAX_RATIO * quote_units,
+          "用例材料不该先被三倍那一档拦下（%d 字 vs %d × %d 字），否则拦住它的就不是天花板"
+          % (cap_units, redpen.FIX_MAX_RATIO, quote_units))
+    rc, out, err = submit(root, marks)
+    check(rc == 1, "整段改法应当被天花板拦下，rc=%d\n%s%s" % (rc, out, err))
+    check("最多" in out, "应当报出预算构成、说明最多能写多少字：\n%s" % out)
+
+
+def t_quote_char_ceiling():
+    """引文双条件：新口径的 200 字之外，再加一道原串字符硬顶。
+
+    引文从常量现算（`QUOTE_MAX_CHARS + 120`），将来常量动了这颗牙跟着动。前置断言
+    先把「拦住它的是哪道闸」钉死：这条引文的字数落在 200 以内，所以响的必须是字符
+    硬顶而不是字数闸。改前的脚本对同一条引文报的是「引文有 519 字，超过 200 字上限」
+    （520 个字符里末尾那个空格被 strip 掉了），里面没有「字符」二字 —— 手工对照见 PR，
+    那句话就是这颗牙要接管的那句事实。
+    """
+    quote = max(DRAFT_EN.split("\n\n"), key=len)[:redpen.QUOTE_MAX_CHARS + 120]
+    check(redpen.unit_len(quote) < redpen.QUOTE_MAX,
+          "引文的字数必须落在 %d 以内，否则先响的是字数闸、这颗牙就验不到字符硬顶"
+          % redpen.QUOTE_MAX)
+    root = workspace(text=DRAFT_EN, name="draft.txt", brief=BRIEF_EN)
+    marks = [
+        {"quote": quote, "level": "minor",
+         "note": "Quoting most of a paragraph is not a line-level comment."},
+        {"quote": EN_ASK, "level": "major",
+         "note": "This is the only sentence that tells the reader what to do next."},
+    ]
+    rc, out, err = submit(root, marks)
+    check(rc == 1, "超过字符硬顶的引文应当被拒收，rc=%d\n%s%s" % (rc, out, err))
+    check("字符" in out, "应当说明拦住它的是字符硬顶：\n%s" % out)
+
+
+def t_note_min_counts_words():
+    """批语下限 6 从字符换成字：中文一个字不变，英文侧从 6 个字符收紧成 6 个词。
+
+    第一条沿用 t_fix_budget_floor 那条（改前被三倍闸拦下，换尺之后落在 20 字地板
+    之内），第二条的批语是「Too vague.」——10 个字符过得了今天的 NOTE_MIN，只有 2
+    个词。今天这份提交是被第 1 条的三倍闸拦下的，输出里没有「批语」二字，这颗牙红
+    在关键词那一行。
+    """
+    root = workspace(text=DRAFT_EN, name="draft.txt", brief=BRIEF_EN)
+    marks = [
+        {"quote": "Hi Dana,", "level": "minor",
+         "note": "The greeting takes a whole line and then stalls before any ask.",
+         "fix": "Add a one-line ask under it."},
+        {"quote": EN_ASK, "level": "major", "note": "Too vague."},
+    ]
+    check(redpen.unit_len(marks[1]["note"]) < redpen.NOTE_MIN <= len(marks[1]["note"]),
+          "第二条的批语必须字数不足而字符数够（%d 字 / %d 字符，NOTE_MIN=%d），否则验的就不是换尺"
+          % (redpen.unit_len(marks[1]["note"]), len(marks[1]["note"]), redpen.NOTE_MIN))
+    rc, out, err = submit(root, marks)
+    check(rc == 1, "两个词的批语应当被拒收，rc=%d\n%s%s" % (rc, out, err))
+    check("批语" in out, "应当说明是批语太短：\n%s" % out)
+
+
+def t_short_draft_budget():
+    """短稿的合计预算要有地板 60 字，否则三条正常改法就顶掉一整篇群公告。
+
+    正例：31 字的公告上三条批注、改法合计 36 字。改前实测
+    `[ERROR] fix 合计 36 字，超过全稿 34 字的一半`、rc=1 —— 这颗牙今天红在这里。
+    反例：同一份公告上六条、改法合计 72 字，超过 60 字的地板，仍要被拦下；六条改法
+    各自都落在自己的预算之内，所以响的只会是合计那一道闸。
+    """
+    root = workspace(text=DRAFT_NOTICE, name="draft.txt")
+    rc, out, err = submit(root, notice_marks_ok())
+    check(rc == 0, "短稿上三条正常改法应当过闸，rc=%d\n%s%s" % (rc, out, err))
+    check("[WARN]" not in out, "短稿上不该再有提醒：\n%s" % out)
+
+    over = workspace(text=DRAFT_NOTICE, name="draft.txt")
+    rc, out, err = submit(over, notice_marks_over())
+    check(rc == 1, "合计超过地板 60 字仍应拒收，rc=%d\n%s%s" % (rc, out, err))
+    check("合计" in out, "应当说明是改法合计超了：\n%s" % out)
+
+
+def t_coverage_needs_three_blocks():
+    """稿子不足三块就不提醒「只批了开头」：单块短公告上那句提醒本来就无从谈起。
+
+    改前实测：`[WARN] 所有引文都落在稿子前 20% 的篇幅里……` —— 公告只有一块，
+    引文落在哪里都是「前 20%」，这颗牙今天红在 `"[WARN]" not in out` 那一行。
+    这次修改没有把提醒整体关掉，证据是现成的 t_coverage_warn：DRAFT_FRONT 有 4 块，
+    批注挤在开头时仍必须出 WARN 且含「20%」，那条用例一个字都没动。
+    """
+    root = workspace(text=DRAFT_NOTICE, name="draft.txt")
+    marks = [{"quote": "各位家长好", "level": "remark",
+              "note": "开头这一句没带任何信息，手机上第一眼看到的就是它。"}]
+    rc, out, err = submit(root, marks)
+    check(rc == 0, "单条批注的公告应当过闸，rc=%d\n%s%s" % (rc, out, err))
+    check("[WARN]" not in out, "只有一块的稿子不该报覆盖 WARN：\n%s" % out)
+
+
+def t_few_marks_hint():
+    """条数少又锚不上时补一句指路：回原文重抄，不是删条凑比例。
+
+    三条里锚上两条（2/3 = 0.67 低于 0.7），改前报的是「请照原文一字不差地重引」，
+    里面没有「重抄」二字 —— 这颗牙今天红在关键词那一行。这句提示按条数触发，条数够
+    多时不打，反例是现成的 t_anchor_ratio（5 条里锚不上 2 条，那份输出里不许出现「重抄」）。
+    """
+    root = workspace()
+    marks = marks_ok()[:2] + [
+        {"quote": "这句话稿子里根本没有出现过", "level": "minor", "note": "这条引文是编的，锚不上。"},
+    ]
+    rc, out, err = submit(root, marks)
+    check(rc == 1, "锚定率 0.67 应退出 1，rc=%d\n%s%s" % (rc, out, err))
+    check("重抄" in out, "条数少时应当补一句回原文重抄：\n%s" % out)
+
+
+def t_init_units_line():
+    """init 那一行的字数换成新口径，并且把口径当场写清楚；语言那一项有依据时才打。
+
+    字数从 fixture 现算 —— `cmd_init` 算的就是 `unit_len(anchor.plain_text(text))`，
+    两边同源，换了正文也不用回来改断言。「（汉字按字、英文按词，标点不算）」是本期
+    定型的措辞，逐字钉死，也是与期 2 之间的契约。
+    """
+    want = "正文 %d 字" % redpen.unit_len(redpen.anchor.plain_text(DRAFT_EN))
+    root = tempfile.mkdtemp(prefix="red-pen-selftest-")
+    _TEMPS.append(root)
+    src = os.path.join(root, "source", "mail.txt")
+    write(src, DRAFT_EN)
+    rc, out, err = run(root, "init", "mail-en", "--from", src)
+    check(rc == 0, "init 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+    check(want in out, "字数行应当写成「%s」：\n%s" % (want, out))
+    check("（汉字按字、英文按词，标点不算）" in out, "字数行应当逐字带上口径说明：\n%s" % out)
+    check("批语语言" not in out, "第一次收稿又没给 --lang 时不该猜批语语言：\n%s" % out)
+
+    rc, out, err = run(root, "init", "mail-en-2", "--from", src, "--lang", "en")
+    check(rc == 0, "init --lang en 应退出 0，rc=%d\n%s%s" % (rc, out, err))
+    check("· 批语语言 en" in out, "给了 --lang 就该把批语语言打出来：\n%s" % out)
+
+    zh_src = os.path.join(root, "source", "weekly.md")
+    write(zh_src, DRAFT_V1)
+    rc, out, err = run(root, "init", "weekly-zh", "--from", zh_src)
+    check(rc == 0, "init 中文稿应退出 0，rc=%d\n%s%s" % (rc, out, err))
+    got = re.search(r"正文 (\d+) 字", out)
+    check(got, "init 应当打出正文字数：\n%s" % out)
+    plain = len(redpen.anchor.plain_text(DRAFT_V1))
+    check(int(got.group(1)) != plain,
+          "中文稿的字数不该等于纯文本的 %d 个字符（那是没换口径）：\n%s" % (plain, out))
+
+
+def t_gates_ignore_lang():
+    """闸门的宽严绝不许挂在 brief.lang 上 —— 那是 Agent 自己写得动的字段。
+
+    挂上去就等于开了一条「把 lang 改成 en 就能拿到更宽预算」的道。同一份稿子、
+    同一套会被逐条闸拦下的批注，brief.lang 一个 zh 一个 en，两次 review 的退出码与
+    全部 [ERROR] 行必须逐字相同（context_hash 不同不影响闸门结论）。这是一条不变量，
+    今天就该成立；它防的是将来。
+    """
+    def submitted(lang):
+        brief = dict(BRIEF_V1)
+        brief["lang"] = lang
+        root = workspace(brief=brief)
+        marks = marks_ok()[:2]
+        marks[0]["fix"] = "这里应当换一种说法，把三栏各自负责什么讲清楚，再补一句为什么不是四栏。"
+        rc, out, err = submit(root, marks)
+        return rc, [line for line in out.split("\n") if line.startswith("[ERROR]")]
+
+    rc_zh, errs_zh = submitted("zh")
+    rc_en, errs_en = submitted("en")
+    check(errs_zh, "用例材料本身应当至少触发一条 [ERROR]，否则这条不变量验不到东西")
+    check(rc_zh == rc_en, "两种批语语言的退出码应当相同：zh=%d en=%d" % (rc_zh, rc_en))
+    check(errs_zh == errs_en,
+          "两种批语语言的 [ERROR] 行应当逐字相同：\nzh：\n%s\nen：\n%s"
+          % ("\n".join(errs_zh), "\n".join(errs_en)))
+
+
+DOC_CONSTANTS = ("MARKS_MAX", "QUOTE_MAX", "QUOTE_MAX_CHARS", "NOTE_MIN", "FIX_MAX_RATIO",
+                 "FIX_MIN_UNITS", "FIX_MAX_UNITS", "FIX_TOTAL_MIN_UNITS",
+                 "FRONT_MIN_BLOCKS", "MIN_ANCHORED")
+
+
+def t_doc_numbers_match():
+    """契约同步牙：闸门那一节里的数字要与脚本常量对得上。
+
+    局限写在这里 —— 个位数（3）会被这一节里别处的数字碰巧匹配上，所以它防的是
+    「改了常量忘了改文档」，不是「文档写得对」。文档不在时记为跳过。
+    """
+    doc = os.path.join(SKILL_DIR, "references", "workspace-format.md")
+    if not os.path.isfile(doc):
+        raise Skipped("references/workspace-format.md 还没到位")
+    text = read(doc)
+    lo, hi = text.find("## 4."), text.find("## 6.")
+    check(lo >= 0 and hi > lo, "workspace-format.md 里应当有 ## 4. 与 ## 6. 两节")
+    section = text[lo:hi]
+    for name in DOC_CONSTANTS:
+        value = getattr(redpen, name)
+        check(str(value) in section,
+              "常量 %s = %s 没有出现在闸门那一节里：改了常量要同一个 commit 改文档" % (name, value))
+
+
 SELFTESTS = (
     t_init_from_txt_md_html_docx,
     t_docx_table_and_textbox,
@@ -580,6 +952,18 @@ SELFTESTS = (
     t_check_tamper,
     t_export_no_text,
     t_banned_scan,
+    # 期 1：口径 → 形状闸 → 覆盖闸 → 锚定闸 → init → 护栏
+    t_unit_len_is_normalization_blind,
+    t_fix_budget_floor,
+    t_fix_budget_cap,
+    t_quote_char_ceiling,
+    t_note_min_counts_words,
+    t_short_draft_budget,
+    t_coverage_needs_three_blocks,
+    t_few_marks_hint,
+    t_init_units_line,
+    t_gates_ignore_lang,
+    t_doc_numbers_match,
 )
 
 
