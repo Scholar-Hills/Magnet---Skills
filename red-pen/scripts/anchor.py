@@ -9,8 +9,10 @@
   sanitize(html)                   白名单消毒；正文进引擎前必经的第一道
   extract(html)                    消毒后一次遍历同时产出纯文本与位置映射
   plain_text(html)                 extract(html).text 的快捷方式
+  blocks(ex)                       把纯文本切成块，返回下标对；块边界认零宽区间，边界见函数说明
   normalize(s)                     引文与原文共用的规范化（供各 Skill 的 CLI 复用）
   locate(ex, quote)                在原文里定位一句引文，返回 (start, end, partial)
+  locate_reason(ex, quote)         钉不住时的原因：CROSS_BLOCK / NOT_FOUND
   annotate(html, marks)            按引文锚定并 splice 出带 mark 的 HTML
   render_page(title, original_html, result, meta)   自包含单页报告
   LEVELS / DEFAULT_LEVEL           等级白名单；模型给的等级只能落在这里面
@@ -334,6 +336,32 @@ def plain_text(html: str) -> str:
     return extract(html).text
 
 
+def blocks(ex: Extraction) -> List[Tuple[int, int]]:
+    """把 ex.text 切成块，返回落在 ex.text 上的下标对。
+
+    判据只有一条：零宽区间上的换行才是块边界，块内的软换行不是（软换行是稿子里
+    真有的那个字符，映射得到 HTML 上的一段）。恒等式
+    `ex.text == "\\n".join(ex.text[a:b] for a, b in blocks(ex))` 恒成立。
+
+    **它数的是位置映射里现有的块，不是 HTML 语义块的全集，这条边界要写明白**：
+    `_Walker._push` 在文本已经以换行结尾时不再补零宽分隔符，所以文本节点自带尾
+    换行的稿子（`<p>甲\\n</p><p>乙</p>`，以及缩进美化过的 HTML）在这里只算一块——
+    那处真实的段落边界落成了非零宽的换行，与块内软换行分不开。`locate()` 对同一
+    处也照样锚得上，两个入口口径一致，不会一个说锚得上、另一个说跨块；这是引擎
+    改动前就有的行为，不是这个函数引入的。**靠块数做判断的闸门要把这条算进去。**
+    要数块请走这一个入口，不要另外去数换行符——数换行符连块内软换行也会算进去，
+    比这里更不准。
+    """
+    out = []                                  # type: List[Tuple[int, int]]
+    start = 0
+    for i, (a, b) in enumerate(ex.spans):
+        if a == b and ex.text[i] == "\n":
+            out.append((start, i))
+            start = i + 1
+    out.append((start, len(ex.text)))
+    return out
+
+
 # ---------------------------------------------------------------- 规范化与定位
 
 _CHAR_MAP = {"\xa0": " ", "　": " ",
@@ -470,8 +498,13 @@ def _to_html_span(ex: Extraction, back: List[int], lo: int, hi: int,
     return start, end, partial
 
 
-def locate(ex: Extraction, quote: str) -> Optional[Tuple[int, int, bool]]:
-    """在原文里定位一句引文，返回 (start, end, partial)；找不到返回 None。"""
+def _search(ex: Extraction, quote: str) -> Optional[Tuple[List[int], int, int, bool]]:
+    """定位的前半段：在规范化后的正文里找引文，返回 (back, lo, hi, partial)。
+
+    分支顺序就是锚定口径本身——精确 → 剥掉引文首尾标点再试 → 头尾锚定，换一下
+    顺序锚定结果就变。`locate()` 与 `locate_reason()` 共用这一份，免得两个入口
+    各走一套分支、对同一句引文给出对不上的结论。
+    """
     if not quote or not ex.text:
         return None
     hay, back = _fold(ex.text)
@@ -490,10 +523,46 @@ def locate(ex: Extraction, quote: str) -> Optional[Tuple[int, int, bool]]:
         span, partial = _anchor_ends(hay, needle)
     if span is None:
         return None
-    return _to_html_span(ex, back, span[0], span[1], partial)
+    return back, span[0], span[1], partial
+
+
+def locate(ex: Extraction, quote: str) -> Optional[Tuple[int, int, bool]]:
+    """在原文里定位一句引文，返回 (start, end, partial)；找不到返回 None。"""
+    hit = _search(ex, quote)
+    if hit is None:
+        return None
+    back, lo, hi, partial = hit
+    return _to_html_span(ex, back, lo, hi, partial)
+
+
+def locate_reason(ex: Extraction, quote: str) -> Optional[str]:
+    """钉得住返回 None；钉不住给出原因：CROSS_BLOCK 或 NOT_FOUND。
+
+    与 `locate()` 走同一次 `_search`，所以「有没有钉住」两边永远是同一个答案。
+    找到了却锚不上，只有跨块这一种说得出口的原因：区间里夹着零宽的块边界。
+    其余情形一律报 NOT_FOUND——**不假称跨块**，宁可说「没找到」也不要给用户一个
+    查下去也查不出所以然的原因。
+    """
+    hit = _search(ex, quote)
+    if hit is None:
+        return NOT_FOUND
+    back, lo, hi, partial = hit
+    if _to_html_span(ex, back, lo, hi, partial) is not None:
+        return None
+    if hi <= lo:                              # 防御：保证 back[hi - 1] 不越界。
+        return NOT_FOUND                      # 今天 _search 的两条返回路径都给不出空区间
+    for k in range(back[lo], back[hi - 1] + 1):
+        a, b = ex.spans[k]
+        if a == b and ex.text[k] == "\n":
+            return CROSS_BLOCK
+    return NOT_FOUND
 
 
 # ---------------------------------------------------------------- 批注
+
+# locate_reason() 的两种原因；本期只交出这个入口，报错文案还没接上。
+NOT_FOUND = "not_found"
+CROSS_BLOCK = "cross_block"
 
 _MARK_KEYS = ("id", "quote", "level", "note", "fix", "anchored", "partial",
               "start", "end", "level_fixed", "dropped_overlap")
@@ -1024,6 +1093,59 @@ def t_forged_no_bypass():
         check("甲" in doc, "截断输入的正文应保留，实际 %r" % doc)
 
 
+def t_locate_reason():
+    """块边界与块内软换行分得开：blocks() 数块，locate_reason() 说清为什么没钉住。"""
+    ex = extract('第一段。\n\n第二段。\n\n列表：\n1. 甲；\n2. 乙。')
+    bs = blocks(ex)
+    check(len(bs) == 3, "三段稿子应数出 3 块，实际 %d 块：%r" % (len(bs), bs))
+    rejoined = "\n".join(ex.text[a:b] for a, b in bs)
+    check(ex.text == rejoined, "块拼回来应逐字等于纯文本，实际 %r" % rejoined)
+
+    soft = '1. 甲；\n2. 乙。'
+    check(locate_reason(ex, soft) is None,
+          "块内软换行不算跨块，应返回 None，实际 %r" % locate_reason(ex, soft))
+    check(locate(ex, soft) == (29, 40, False),
+          "跨软换行的引文应精确命中 (29, 40, False)，实际 %r" % (locate(ex, soft),))
+
+    cross = '第一段。\n第二段。'
+    check(locate_reason(ex, cross) == CROSS_BLOCK,
+          "横跨两块应报 %r，实际 %r" % (CROSS_BLOCK, locate_reason(ex, cross)))
+    check(locate(ex, cross) is None, "横跨两块不锚定，实际 %r" % (locate(ex, cross),))
+
+    gone = '稿子里没有这句话'
+    check(locate_reason(ex, gone) == NOT_FOUND,
+          "稿子里没有的引文应报 %r，实际 %r" % (NOT_FOUND, locate_reason(ex, gone)))
+    check(locate(ex, gone) is None, "稿子里没有的引文不锚定，实际 %r" % (locate(ex, gone),))
+
+    # 容易想反的一条：跨块的两句连写成一串时报的是「找不到」，不是「跨块」——
+    # 规范化把块边界折成一个空格，连写的串在规范化后的正文里本来就不存在。
+    joined = '第一段。第二段。'
+    check(locate_reason(ex, joined) == NOT_FOUND,
+          "连写的跨块串应报 %r，实际 %r" % (NOT_FOUND, locate_reason(ex, joined)))
+
+    # HTML 稿里的 <br> 是块边界（在 _BLOCK_TAGS 里），不是块内软换行：同样一句
+    # '甲\n乙'，纯文本稿里能整段引，写成 <br> 就锚不上。这条差别要钉住。
+    br = extract('<p>甲<br>乙</p>')
+    check(len(blocks(br)) == 2, "<br> 应切出 2 块，实际 %d 块" % len(blocks(br)))
+    check(locate(br, '甲\n乙') is None, "跨 <br> 不锚定，实际 %r" % (locate(br, '甲\n乙'),))
+    check(locate_reason(br, '甲\n乙') == CROSS_BLOCK,
+          "跨 <br> 应报 %r，实际 %r" % (CROSS_BLOCK, locate_reason(br, '甲\n乙')))
+
+    # 反过来那一向**不恒成立**，这里钉住现状而不是钉住愿望：文本节点自带尾换行时
+    # _Walker._push 不再补零宽分隔符，那处真实的段落边界就与块内软换行分不开——
+    # blocks() 把两段并成一块，locate() 也照样锚得上（引擎改动前就是如此）。
+    # 下一个人拿 blocks() 数块之前先看这三条断言，别把「块边界必是零宽区间」当恒真。
+    merged = extract('<p>甲\n</p><p>乙</p>')
+    check(len(blocks(merged)) == 1,
+          "文本节点尾换行处的块边界不是零宽区间，现状是并成 1 块，实际 %d 块" % len(blocks(merged)))
+    check(merged.text == "\n".join(merged.text[a:b] for a, b in blocks(merged)),
+          "并块的情形下恒等式仍应成立，实际 %r" % merged.text)
+    check(locate(merged, '甲\n乙') is not None,
+          "并块处 locate() 现状是锚得上，实际 %r" % (locate(merged, '甲\n乙'),))
+    check(locate_reason(merged, '甲\n乙') is None,
+          "并块处两个入口口径必须一致（都说锚得上），实际 %r" % locate_reason(merged, '甲\n乙'))
+
+
 def t_banned_words_selfscan():
     """引擎自身不含禁用词；同时正向验证扫描器确实会报。"""
     import os
@@ -1082,6 +1204,7 @@ SELFTESTS = (
     t_attr_value_angle,
     t_forged_mark,
     t_forged_no_bypass,
+    t_locate_reason,
     t_banned_words_selfscan,
 )
 

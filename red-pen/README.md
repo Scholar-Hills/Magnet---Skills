@@ -6,22 +6,23 @@
 
 ## 为什么要有它
 
-让模型点评一段稿子很容易，让它的点评**站得住**很难。三件事最常出问题，这份 Skill 把它们各变成一道机器闸门：
+让模型点评一段稿子很容易，让它的点评**站得住**很难。三件事最常出问题，这份 Skill 用机器闸门配合批注纪律来约束：
 
 - **批注飘在半空。** 「第三段有点啰嗦」——哪一句？模型说不出，或者说出来的那句原文里根本没有。这里每条批注必须带一句一字不差的原文引文，脚本拿去原文里定位；**钉不住的老实标成「未能定位」单列一节，绝不硬贴到某个位置**。钉住的不足七成，整份退回重批。
-- **点评变成代笔。** 用户拿来 600 字，模型返回一份 400 字的「建议版本」——用户既看不出原来哪里不好，下次还是写成一样。这里的改法只许针对被引的那一句，长度不超过引文的三倍；所有改法加起来超过稿子的一半，整份拒收。
-- **同一句评语贴满全篇。** 两条引文相同、或两条批语相同，整份拒收。批注全挤在开头 20% 的篇幅里会被提醒。
+- **点评变成代笔。** 用户拿来 600 字，模型返回一份 400 字的「建议版本」——用户既看不出原来哪里不好，下次还是写成一样。这里的改法只许针对被引的那一句，长度按预算算：引文字数 × 3，最少 20 字、最多 40 字；所有改法加起来超过稿子的一半（短稿另有 60 字的地板），整份拒收。长度闸限制长建议，不能识别所有整段或整篇短稿重写；过闸也仍须遵守不代笔的纪律。
+- **同一句评语贴满全篇。** 两条引文相同、或两条批语相同，整份拒收。批注全挤在开头 20% 的篇幅里会被提醒（稿子分得出三块时才提醒）。
 
 另外它**不打分**：没有分数、没有评级、没有整体印象。稿子好不好由你自己判断，红笔的职责是把可改的地方指出来。
 
 ## 安装
 
+**先拿到目录。** 在小红书笔记下方的 RED Skill 组件里下载压缩包并解压。找到其中含有 `SKILL.md`、`scripts/`、`references/` 与 `examples/` 的 `red-pen` 文件夹，在它的上一级目录打开终端，让下面的 `./red-pen` 指向这份完整目录，再按平台安装。
+
 **Claude Code**
 
 ```bash
 mkdir -p ~/.claude/skills
-git clone https://github.com/<org>/<repo>.git /tmp/red-pen-src
-cp -R /tmp/red-pen-src/red-pen ~/.claude/skills/red-pen
+cp -R ./red-pen ~/.claude/skills/
 ```
 
 装完的样子是 `~/.claude/skills/red-pen/SKILL.md`。只想给某个项目用，就换成该项目下的 `.claude/skills/red-pen/`（同样要有 `red-pen` 这一层）。重开一个会话，输入 `/skills` 能看到 `red-pen` 就是装好了；然后丢一段稿子过去说「帮我看看」。
@@ -29,19 +30,28 @@ cp -R /tmp/red-pen-src/red-pen ~/.claude/skills/red-pen
 **WorkBuddy（腾讯）**
 
 ```bash
-git clone https://github.com/<org>/<repo>.git /tmp/red-pen-src
-cp -R /tmp/red-pen-src/red-pen ~/.workbuddy-ai/skills/red-pen
+mkdir -p ~/.workbuddy-ai/skills
+cp -R ./red-pen ~/.workbuddy-ai/skills/
 ```
 
 WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数据目录是 `~/.workbuddy/`，就放到 `~/.workbuddy/skills/red-pen`。装完在对话框输入 `/skills`，列表里有 `red-pen` 即可。
 
 **用之前先选一个固定工作区**（输入框下方「Select Workspace」→ Open Local Folder，选一个专门放稿子的文件夹）。不选的话 WorkBuddy 会给每个任务新建一个 `~/WorkBuddy AI/<时间戳>/` 目录，同一篇稿子的历轮批注会散落在不同目录里，`stats` 就比不出「上一版的哪几条这次消失了」。
 
+已经散了就跑 `python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py doctor --scan` 查看线索；如果提示没有安全可扫的目录，就在 `--scan` 后加上你确认要扫描的目录。它只报告位置，不会搬动稿子或合并历史。
+
 **其他 Agent**（OpenClaw、Codex 等）：把 `red-pen` 目录放进各自的技能目录或工作区（OpenClaw 为 `~/.openclaw/workspace/skills/`），让 Agent 先读 `SKILL.md`。
 
-**（从小红书来的读者）** 笔记下方的 RED Skill 组件里可以一键复制安装口令，直接发给你的 Agent 即可，不用手动 clone。
+代码仓库目前还没有公开，暂不提供仓库克隆地址；开放之后会补上。有问题先在小红书笔记下留言。
 
-本机需要 `python3`（3.8+），没有别的依赖。运行 `python3 scripts/redpen.py doctor` 查看。它需要在你机器上运行 `python3` 来锚定批注，第一次会请求授权。
+本机需要 `python3`（3.8+），没有别的依赖。在选好的工作区打开终端，按安装平台运行下面对应的一行，检查环境并核对工作区位置：
+
+```bash
+python3 ~/.claude/skills/red-pen/scripts/redpen.py doctor
+python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py doctor
+```
+
+它需要在你机器上运行 `python3` 来锚定批注，第一次会请求授权。
 
 ## 用法
 
@@ -54,30 +64,40 @@ WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数�
 一页红笔稿：drafts/<slug>/review.html
        ↓
 （你自己改完，再交回来）再看一遍
-它报出：上一版 7 条批注里有 4 条在新稿里消失了 —— 那 4 处就是你真正改动到的地方
+它报出：上一版钉住的 7 条批注里有 4 条在新稿里消失了 —— 没定位的不算；引文找不到不等于问题已解决
 ```
 
-想自己敲命令也可以（`--root` 是顶层选项，写在子命令前面）：
+想自己敲命令也可以（`--root` 写在子命令前面或后面都认，建议只给一次；前后各给一次时，按当前目录转成绝对路径后相同才接受，不同则退出 2）：
+
+在选好的工作区运行。下面以 Claude Code 的安装路径为例；WorkBuddy 用户把 `~/.claude/skills/red-pen/` 换成 `~/.workbuddy-ai/skills/red-pen/`，其他安装位置也相应替换。先准备自己的 `稿子.md` 和 `brief.json`，brief 与批注的 JSON 格式见 [工作区契约](references/workspace-format.md)。这些是分步命令：拿到 `context` 输出后，须按它写好 `drafts/newsletter-01/inbox/marks.json`，再跑 `review`。
 
 ```bash
-python3 scripts/redpen.py init newsletter-01 --from 稿子.md   # 收稿；同名再跑一次算新版本
-python3 scripts/redpen.py brief set newsletter-01 --from brief.json
-python3 scripts/redpen.py context newsletter-01               # 上下文包，Agent 照着它写批注
-python3 scripts/redpen.py review newsletter-01                # 过闸 → 锚定 → 红笔页
-python3 scripts/redpen.py stats newsletter-01                 # 与上一版对比
-python3 scripts/redpen.py check newsletter-01                 # 离线复核整个工作区
+python3 ~/.claude/skills/red-pen/scripts/redpen.py doctor       # 查看环境与工作区
+python3 ~/.claude/skills/red-pen/scripts/redpen.py init newsletter-01 --from 稿子.md   # 同名稿正文或目标后缀改变才升版；两者都相同不升版；稿子贴在对话里时用 --from - 从标准输入收
+python3 ~/.claude/skills/red-pen/scripts/redpen.py brief set newsletter-01 --from brief.json
+python3 ~/.claude/skills/red-pen/scripts/redpen.py context newsletter-01   # 上下文包，Agent 照着它写批注
+# 先写好 inbox/marks.json，再运行下面几条。
+python3 ~/.claude/skills/red-pen/scripts/redpen.py review newsletter-01    # 过闸 → 锚定 → 红笔页
+python3 ~/.claude/skills/red-pen/scripts/redpen.py stats newsletter-01     # 与上一版对比
+python3 ~/.claude/skills/red-pen/scripts/redpen.py check newsletter-01     # 离线复核整个工作区
+python3 ~/.claude/skills/red-pen/scripts/redpen.py export newsletter-01    # 只导出计数与哈希
 ```
 
-产物在 `drafts/<slug>/`：`review.html` 是可以截图的红笔稿，`marks.json` 是过闸之后的批注记录，`history/` 里存着每一版的稿子与每一轮的批注。`examples/drafts/newsletter-01/` 是一个跑通的示例，可以直接 `check` 试手。
+产物在 `drafts/<slug>/`：`review.html` 是可以截图的红笔稿，`marks.json` 是过闸之后的批注记录，`history/` 里存着每一版的稿子与每一轮的批注。`examples/drafts/newsletter-01/` 是一个跑通的示例，按安装平台选下面对应的一行就能离线复核试手：
+
+```bash
+python3 ~/.claude/skills/red-pen/scripts/redpen.py check ~/.claude/skills/red-pen/examples/drafts/newsletter-01
+python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py check ~/.workbuddy-ai/skills/red-pen/examples/drafts/newsletter-01
+```
 
 ## 边界
 
 - **批注钉在原句上。** 每条批注必须带一句一字不差的原文引文；锚不到的自动标成「未能定位」单列一节，**脚本绝不擅自摆放**——摆错地方比不摆更糟。钉住的不足七成，整份退回重批。
 - **不打分。** 没有分数、没有评级、没有整体印象。
-- **改法只针对被引的那一句。** 给方向、给一个可以照抄的短句；不超过引文的三倍，全部改法加起来不超过稿子的一半。要整段重写请自己动笔，这份 Skill 不代笔。
+- **改法只针对被引的那一句。** 给方向、给一个可以照抄的短句；长度按预算算：引文字数 × 3，最少 20 字、最多 40 字，全部改法加起来不超过稿子的一半（短稿另有 60 字的地板）。预算内也不许整段重写，或把几条改法拼成完整新稿。要整段重写请自己动笔，这份 Skill 不代笔。
 - **稿子只读。** 脚本不改你的稿子，Agent 也不许改。新版本走 `init` 收成新一版，历史只增不改。
 - 给的是**批注的纪律**，不是文笔：批语由你的 Agent 现写，质量取决于模型；纪律保证它引的是原文、钉得住位置、不越界替你写。
-- 收 `.md` / `.html` / `.txt` / `.docx`。Markdown 不解析（`##` 会当普通字符留在正文里）；docx 只读文字段落，表格按段落读出、表结构会丢，图片与修订痕迹不支持。
+- 收 `.md` / `.html` / `.txt` / `.docx`。PDF、旧 Word、RTF、ODT、表格、演示、图片与压缩包等会被拒收，脚本会告诉你怎么转。Markdown 不解析（`##` 会当普通字符留在正文里）；docx 只读文字，表格按行读出、整行可以引，跨行引不了；图片不做文字识别，普通文字图注保留，修订痕迹与 Word 批注读不到。
 
 ## 安全说明
 
@@ -87,4 +107,4 @@ python3 scripts/redpen.py check newsletter-01                 # 离线复核整�
 
 ## 许可与维护
 
-MIT。由学霸山丘技术团队维护。问题与建议请提 issue。
+MIT。由学霸山丘技术团队维护。问题与建议请在小红书笔记下留言；仓库公开后会补上 issue 入口。
