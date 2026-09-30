@@ -1,6 +1,6 @@
 # 先把作业出出来，再让 AI 备课 · lesson-prep
 
-> 出不来作业的课，讲了也白讲——所以这份 Skill 第一步就锁死：作业没出，阶段不许规划。
+> 默认先出作业，再围绕学习目标组织课堂内容，每一步都验收。
 
 一份给 Claude Code / WorkBuddy / OpenClaw / Codex 等 Agent 用的 Skill：老师交一张课纲卡（课题、课时、学习目标），Agent 按「**出作业 → 规划阶段 → 逐页写投屏正文与教师讲稿 → 出成品**」四步走，每一步由一个零依赖的 Python 脚本机器验收、盖章存证。作业里每道题都要被某一页**真讲到**——脚本拿题干的实词去每页的正文和讲稿里对照，不看模型自报的标签。成品 `deck.html` 由脚本从页稿派生，模型不写第二遍 HTML；教师讲稿另出 `notes.html`，绝不进投屏文件。
 
@@ -25,34 +25,48 @@
 
 ## 安装
 
-**Claude Code**
+[仓库首页](../README.md#快速安装)提供在线安装命令。也可以先从首页下载仓库，或下载本 Skill 的完整文件夹，在该文件夹的上一级目录打开终端，再按提示选择目标 Agent：
+
+```bash
+npx skills@latest add ./lesson-prep --skill lesson-prep
+```
+
+需要 Node.js 与 npm。默认安装到当前项目；希望跨项目使用时加 `--global`。这一步安装的是完整 Skill 目录，包括脚本与参考文档。
+
+也可指定客户端：
+
+```bash
+npx skills@latest add ./lesson-prep --skill lesson-prep --agent claude-code
+npx skills@latest add ./lesson-prep --skill lesson-prep --agent codex
+```
+
+不使用命令行安装器，或使用 WorkBuddy、小红书下载包时，请看[仓库安装指南](../README.md#手动安装)。复制整个 `lesson-prep/` 文件夹，不能只复制 `SKILL.md`。已有同名安装时先备份，避免形成嵌套目录。
+
+下载后手动安装到 Claude Code，也可以直接复制完整目录：
 
 ```bash
 mkdir -p ~/.claude/skills
-git clone https://github.com/<org>/<repo>.git /tmp/lesson-prep-src
-cp -R /tmp/lesson-prep-src/lesson-prep ~/.claude/skills/lesson-prep
+cp -R ./lesson-prep ~/.claude/skills/
 ```
 
-装完的样子是 `~/.claude/skills/lesson-prep/SKILL.md`。只想给某个项目用，就换成该项目下的 `.claude/skills/lesson-prep/`（同样要有 `lesson-prep` 这一层）。重开一个会话，输入 `/skills` 能看到 `lesson-prep` 就是装好了；然后说一句「帮我备下周三那节 45 分钟的课」。
-
-**WorkBuddy（腾讯）**
+WorkBuddy 用户按客户端设置选择技能目录，例如：
 
 ```bash
-git clone https://github.com/<org>/<repo>.git /tmp/lesson-prep-src
-cp -R /tmp/lesson-prep-src/lesson-prep ~/.workbuddy-ai/skills/lesson-prep
+mkdir -p ~/.workbuddy-ai/skills
+cp -R ./lesson-prep ~/.workbuddy-ai/skills/
 ```
 
-WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数据目录是 `~/.workbuddy/`，就放到 `~/.workbuddy/skills/lesson-prep`。装完在对话框输入 `/skills`，列表里有 `lesson-prep` 即可。
+安装后重开会话，让 Agent 使用 `lesson-prep`。选一个固定工作区保存后续产物，第一次使用时让 Agent 先读 `SKILL.md` 并运行其中的环境检查。运行脚本需要 Python 3.8 或更高版本，无第三方 Python 依赖。
 
-**用之前先选一个固定工作区**（输入框下方「Select Workspace」→ Open Local Folder，选一个专门放课的文件夹）。不选的话 WorkBuddy 会给每个任务新建一个 `~/WorkBuddy AI/<时间戳>/` 目录，同一节课的页稿、讲稿和成品会散落在不同目录里，**盖章记的是相对工作区的文件路径，换了目录整条链就对不上了**。
+## 开始试用
 
-**其他 Agent**（OpenClaw、Codex 等）：把 `lesson-prep` 目录放进各自的技能目录或工作区（OpenClaw 为 `~/.openclaw/workspace/skills/`），让 Agent 先读 `SKILL.md`。
+适合老师把课题、课时与学习目标变成可验收的课堂材料。默认先出作业，再规划阶段、写投屏正文与讲稿，交付 HTML 课件、独立教师讲稿和验收报告。
 
-**（从小红书来的读者）** 笔记下方的 RED Skill 组件里可以一键复制安装口令，直接发给你的 Agent 即可，不用手动 clone。
+```text
+用 lesson-prep 备一节城市湿地保护课，４５分钟，先确认学习目标。
+```
 
-本机只需要 `python3`（3.8+），没有第三方依赖。运行 `python3 scripts/lessonkit.py doctor` 查看。它需要在你机器上运行 `python3` 来验收，第一次会请求授权。
-
-**语言**：Agent 的回复语言跟随你——你用中文它就全程中文，用英文就全程英文。**投屏和讲稿用什么语言，由你在 `lesson.json` 的 `language` 字段自己填**，脚本不预设任何语言政策。
+[查看完整工作流](SKILL.md) · [浏览示例](examples/) · [反馈问题](../README.md#更新与反馈)
 
 ## 用法
 
@@ -118,4 +132,4 @@ docs/usage-log.md                 真课记录表
 
 ## 许可与维护
 
-MIT。由学霸山丘技术团队维护。问题与建议请提 issue。
+采用 [MIT 许可](../LICENSE)。由学霸山丘技术团队维护。问题与建议请到 [Issues](../README.md#更新与反馈)。

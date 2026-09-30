@@ -1,12 +1,12 @@
 # 刷题私教 · coding-drill
 
-> 它出的题，交一个 `print(42)` 拿不到分。
+> 参考解实际运行，非解与错解先检查，再把题交给你。
 
 一份给 Claude Code / Codex / OpenClaw 等 Agent 用的 Skill：说一个编程知识点，它出一道标准输入/输出的练习题，参考解和隐藏用例先藏起来；你写完它在本机真跑判题，只揭开第一条没过的用例，告诉你那条抓的是什么误解，并记进你的错题本。老师也能用它出“薅不到分”的题并导出题包。
 
 ## 为什么要有它
 
-让 AI 出编程题很容易，让它出的题**判得住**很难。我们拿自己早期批量生成的一批练习题做过实测（数百道，stdin → stdout 形态）：在**没有这套纪律**的情况下，一个只打印常量、根本不读输入的程序平均能拿 **48.8%** 的分；按这套规则重出之后，常量拿 0 分——但“把输入原样打印一个 token”仍能在 **11.2%** 的题上得分，直到补上“至少一条隐藏用例的答案不在输入里”这条规则才归零。问题从来不在模型，在于没人替出题过程设闸门。这份 Skill 把这些闸门写成了 Agent 能执行的步骤，并用一个零依赖脚本机器验证：
+让 AI 出编程题很容易，让它出的题**判得住**很难。这份 Skill 把参考解实跑、非解基线与错解检查写成 Agent 能执行的步骤，再由零依赖脚本验证。通过这些检查说明题包满足当前闸门，不代表任意投机程序都无法得分：
 
 - 期望输出只许由参考解**实跑**得到，绝不手写、绝不回填修正；
 - 打印常量、什么都不打印、原样回显输入、原样提交起步骨架——四个非解**必须全部 0 分**；
@@ -15,32 +15,48 @@
 
 ## 安装
 
-**Claude Code**
+[仓库首页](../README.md#快速安装)提供在线安装命令。也可以先从首页下载仓库，或下载本 Skill 的完整文件夹，在该文件夹的上一级目录打开终端，再按提示选择目标 Agent：
+
+```bash
+npx skills@latest add ./coding-drill --skill coding-drill
+```
+
+需要 Node.js 与 npm。默认安装到当前项目；希望跨项目使用时加 `--global`。这一步安装的是完整 Skill 目录，包括脚本与参考文档。
+
+也可指定客户端：
+
+```bash
+npx skills@latest add ./coding-drill --skill coding-drill --agent claude-code
+npx skills@latest add ./coding-drill --skill coding-drill --agent codex
+```
+
+不使用命令行安装器，或使用 WorkBuddy、小红书下载包时，请看[仓库安装指南](../README.md#手动安装)。复制整个 `coding-drill/` 文件夹，不能只复制 `SKILL.md`。已有同名安装时先备份，避免形成嵌套目录。
+
+下载后手动安装到 Claude Code，也可以直接复制完整目录：
 
 ```bash
 mkdir -p ~/.claude/skills
-git clone https://github.com/<org>/<repo>.git /tmp/coding-drill-src
-cp -R /tmp/coding-drill-src/coding-drill ~/.claude/skills/coding-drill
+cp -R ./coding-drill ~/.claude/skills/
 ```
 
-装完的样子是 `~/.claude/skills/coding-drill/SKILL.md`。只想给某个项目用，就换成该项目下的 `.claude/skills/coding-drill/`（同样要有 `coding-drill` 这一层）。重开一个会话，输入 `/skills` 能看到 `coding-drill` 就是装好了；然后说一句“出题 二分查找 Python 中等”。
-
-**WorkBuddy（腾讯）**
+WorkBuddy 用户按客户端设置选择技能目录，例如：
 
 ```bash
-git clone https://github.com/<org>/<repo>.git /tmp/coding-drill-src
-cp -R /tmp/coding-drill-src/coding-drill ~/.workbuddy-ai/skills/coding-drill
+mkdir -p ~/.workbuddy-ai/skills
+cp -R ./coding-drill ~/.workbuddy-ai/skills/
 ```
 
-WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数据目录是 `~/.workbuddy/`，就放到 `~/.workbuddy/skills/coding-drill`。装完在对话框输入 `/skills`，列表里有 `coding-drill` 即可。
+安装后重开会话，让 Agent 使用 `coding-drill`。选一个固定工作区保存后续产物，第一次使用时让 Agent 先读 `SKILL.md` 并运行其中的环境检查。运行脚本需要 Python 3.8 或更高版本；编程练习按语言另需 Node.js 或 JDK。
 
-**用之前先选一个固定工作区**（输入框下方「Select Workspace」→ Open Local Folder，选一个专门放题的文件夹）。不选的话 WorkBuddy 会给每个任务新建一个 `~/WorkBuddy AI/<时间戳>/` 目录，题目和错题本会散落在不同目录里，错题本就积累不起来了。
+## 开始试用
 
-**其他 Agent**（OpenClaw、Codex 等）：把 `coding-drill` 目录放进各自的技能目录或工作区（OpenClaw 为 `~/.openclaw/workspace/skills/`），让 Agent 先读 `SKILL.md`。
+适合学习者练编程，也适合老师准备练习题。说出知识点、语言和难度，得到题面与起步骨架；作答后在本机运行判题，生成判题卡与错题记录。
 
-**（从小红书来的读者）** 笔记下方的 RED Skill 组件里可以一键复制安装口令，直接发给你的 Agent 即可，不用手动 clone。
+```text
+出题 二分查找 Python 中等
+```
 
-本机需要 `python3`（3.8+）；做 JavaScript 题需要 `node`，做 Java 题需要 `javac` 和 `java`。运行 `python3 scripts/judge.py doctor` 查看。它需要在你机器上运行 `python3` 来判题，第一次会请求授权。
+[查看完整工作流](SKILL.md) · [浏览示例](examples/) · [反馈问题](../README.md#更新与反馈)
 
 ## 用法
 
@@ -72,10 +88,10 @@ examples/                     两道验证过的示例题（Python、JavaScript�
 
 ## 边界
 
-- 给的是出题与判题的**纪律**，不是题库。题由你的 Agent 现出，质量取决于模型；纪律保证它薅不到分、抓得到错。
+- 给的是出题与判题的**纪律**，不是题库。题由你的 Agent 现出，质量取决于模型；脚本检查既定非解与错解；题目质量与未覆盖的错误仍需复核。
 - 只做“完整程序、stdin → stdout”这一种形态；输出只用整数、布尔、单词。
 - Python 无第三方库；JavaScript 为 CommonJS 无 npm 包；Java 公开类必须是 `Main`。
 
 ## 许可与维护
 
-MIT。由学霸山丘技术团队维护。问题与建议请提 issue。
+采用 [MIT 许可](../LICENSE)。由学霸山丘技术团队维护。问题与建议请到 [Issues](../README.md#更新与反馈)。

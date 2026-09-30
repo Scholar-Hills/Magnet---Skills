@@ -17,32 +17,48 @@
 
 ## 安装
 
-**Claude Code**
+[仓库首页](../README.md#快速安装)提供在线安装命令。也可以先从首页下载仓库，或下载本 Skill 的完整文件夹，在该文件夹的上一级目录打开终端，再按提示选择目标 Agent：
+
+```bash
+npx skills@latest add ./essay-sections --skill essay-sections
+```
+
+需要 Node.js 与 npm。默认安装到当前项目；希望跨项目使用时加 `--global`。这一步安装的是完整 Skill 目录，包括脚本与参考文档。
+
+也可指定客户端：
+
+```bash
+npx skills@latest add ./essay-sections --skill essay-sections --agent claude-code
+npx skills@latest add ./essay-sections --skill essay-sections --agent codex
+```
+
+不使用命令行安装器，或使用 WorkBuddy、小红书下载包时，请看[仓库安装指南](../README.md#手动安装)。复制整个 `essay-sections/` 文件夹，不能只复制 `SKILL.md`。已有同名安装时先备份，避免形成嵌套目录。
+
+下载后手动安装到 Claude Code，也可以直接复制完整目录：
 
 ```bash
 mkdir -p ~/.claude/skills
-git clone https://github.com/<org>/<repo>.git /tmp/essay-sections-src
-cp -R /tmp/essay-sections-src/essay-sections ~/.claude/skills/essay-sections
+cp -R ./essay-sections ~/.claude/skills/
 ```
 
-装完的样子是 `~/.claude/skills/essay-sections/SKILL.md`。只想给某个项目用，就换成该项目下的 `.claude/skills/essay-sections/`（同样要有 `essay-sections` 这一层）。重开一个会话，输入 `/skills` 能看到 `essay-sections` 就是装好了；然后丢一篇稿子过去说「帮我看看每段」。
-
-**WorkBuddy（腾讯）**
+WorkBuddy 用户按客户端设置选择技能目录，例如：
 
 ```bash
-git clone https://github.com/<org>/<repo>.git /tmp/essay-sections-src
-cp -R /tmp/essay-sections-src/essay-sections ~/.workbuddy-ai/skills/essay-sections
+mkdir -p ~/.workbuddy-ai/skills
+cp -R ./essay-sections ~/.workbuddy-ai/skills/
 ```
 
-WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数据目录是 `~/.workbuddy/`，就放到 `~/.workbuddy/skills/essay-sections`。装完在对话框输入 `/skills`，列表里有 `essay-sections` 即可。
+安装后重开会话，让 Agent 使用 `essay-sections`。选一个固定工作区保存后续产物，第一次使用时让 Agent 先读 `SKILL.md` 并运行其中的环境检查。运行脚本需要 Python 3.8 或更高版本，无第三方 Python 依赖。
 
-**用之前先选一个固定工作区**（输入框下方「Select Workspace」→ Open Local Folder，选一个专门放稿子的文件夹）。不选的话 WorkBuddy 会给每个任务新建一个 `~/WorkBuddy AI/<时间戳>/` 目录，同一篇稿子的账本、版本快照会散落在不同目录里，改稿之后就接不上前面几轮的评审了。
+## 开始试用
 
-**其他 Agent**（OpenClaw、Codex 等）：把 `essay-sections` 目录放进各自的技能目录或工作区（OpenClaw 为 `~/.openclaw/workspace/skills/`），让 Agent 先读 `SKILL.md`。
+适合检查长文的结构与论证。按原文拆出分段卡，逐段看语言、子问题与主论点，并保留评审和版本记录；也能从题目开始拆子问题，正文由你自己写。
 
-**（从小红书来的读者）** 笔记下方的 RED Skill 组件里可以一键复制安装口令，直接发给你的 Agent 即可，不用手动 clone。
+```text
+用 essay-sections 帮我看看这篇文章的每一段。
+```
 
-本机需要 `python3`（3.8+），没有别的依赖。运行 `python3 scripts/essayctl.py doctor` 查看。它需要在你机器上运行 `python3` 来拆段与记账本，第一次会请求授权。**回复语言跟随你**：你用中文它全程中文，你用英文它全程英文。
+[查看完整工作流](SKILL.md) · [浏览示例](examples/) · [反馈问题](../README.md#更新与反馈)
 
 ## 用法
 
@@ -101,4 +117,4 @@ python3 scripts/essayctl.py check remote-work-cities-01               # 离线�
 
 ## 许可与维护
 
-MIT。由学霸山丘技术团队维护。问题与建议请提 issue。
+采用 [MIT 许可](../LICENSE)。由学霸山丘技术团队维护。问题与建议请到 [Issues](../README.md#更新与反馈)。

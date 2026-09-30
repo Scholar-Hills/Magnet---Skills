@@ -16,32 +16,48 @@
 
 ## 安装
 
-**Claude Code**
+[仓库首页](../README.md#快速安装)提供在线安装命令。也可以先从首页下载仓库，或下载本 Skill 的完整文件夹，在该文件夹的上一级目录打开终端，再按提示选择目标 Agent：
+
+```bash
+npx skills@latest add ./rubric-grader --skill rubric-grader
+```
+
+需要 Node.js 与 npm。默认安装到当前项目；希望跨项目使用时加 `--global`。这一步安装的是完整 Skill 目录，包括脚本与参考文档。
+
+也可指定客户端：
+
+```bash
+npx skills@latest add ./rubric-grader --skill rubric-grader --agent claude-code
+npx skills@latest add ./rubric-grader --skill rubric-grader --agent codex
+```
+
+不使用命令行安装器，或使用 WorkBuddy、小红书下载包时，请看[仓库安装指南](../README.md#手动安装)。复制整个 `rubric-grader/` 文件夹，不能只复制 `SKILL.md`。已有同名安装时先备份，避免形成嵌套目录。
+
+下载后手动安装到 Claude Code，也可以直接复制完整目录：
 
 ```bash
 mkdir -p ~/.claude/skills
-git clone https://github.com/<org>/<repo>.git /tmp/rubric-grader-src
-cp -R /tmp/rubric-grader-src/rubric-grader ~/.claude/skills/rubric-grader
+cp -R ./rubric-grader ~/.claude/skills/
 ```
 
-装完的样子是 `~/.claude/skills/rubric-grader/SKILL.md`。只想给某个项目用，就换成该项目下的 `.claude/skills/rubric-grader/`（同样要有 `rubric-grader` 这一层）。重开一个会话，输入 `/skills` 能看到 `rubric-grader` 就是装好了；然后说一句「按我这份评分标准批一下这批简答」。
-
-**WorkBuddy（腾讯）**
+WorkBuddy 用户按客户端设置选择技能目录，例如：
 
 ```bash
-git clone https://github.com/<org>/<repo>.git /tmp/rubric-grader-src
-cp -R /tmp/rubric-grader-src/rubric-grader ~/.workbuddy-ai/skills/rubric-grader
+mkdir -p ~/.workbuddy-ai/skills
+cp -R ./rubric-grader ~/.workbuddy-ai/skills/
 ```
 
-WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数据目录是 `~/.workbuddy/`，就放到 `~/.workbuddy/skills/rubric-grader`。装完在对话框输入 `/skills`，列表里有 `rubric-grader` 即可。
+安装后重开会话，让 Agent 使用 `rubric-grader`。选一个固定工作区保存后续产物，第一次使用时让 Agent 先读 `SKILL.md` 并运行其中的环境检查。运行脚本需要 Python 3.8 或更高版本，无第三方 Python 依赖。
 
-**用之前先选一个固定工作区**（输入框下方「Select Workspace」→ Open Local Folder，选一个专门放批改的文件夹）。不选的话 WorkBuddy 会给每个任务新建一个 `~/WorkBuddy AI/<时间戳>/` 目录，同一批作答会散落在不同目录里，校准盖章和全班汇总就凑不到一块了。
+## 开始试用
 
-**其他 Agent**（OpenClaw、Codex 等）：把 `rubric-grader` 目录放进各自的技能目录或工作区（OpenClaw 为 `~/.openclaw/workspace/skills/`），让 Agent 先读 `SKILL.md`。
+适合老师按自己提供的评分标准批改一批简答。先确认条目表，再用满分范例与残缺版校准；每条判定引用作答原文，交付个人判题卡与全班汇总。
 
-**（从小红书来的读者）** 笔记下方的 RED Skill 组件里可以一键复制安装口令，直接发给你的 Agent 即可，不用手动 clone。
+```text
+用 rubric-grader 按我提供的评分标准批改这批简答，先确认条目表。
+```
 
-本机只需要 `python3`（3.8+），没有第三方依赖。运行 `python3 scripts/grader.py doctor` 查看。它需要在你机器上运行 `python3` 来核分，第一次会请求授权。
+[查看完整工作流](SKILL.md) · [浏览示例](examples/) · [反馈问题](../README.md#更新与反馈)
 
 ## 用法
 
@@ -95,4 +111,4 @@ examples/grading/short-answer-01/ 一个跑完的示例批次
 
 ## 许可与维护
 
-MIT。由学霸山丘技术团队维护。问题与建议请提 issue。
+采用 [MIT 许可](../LICENSE)。由学霸山丘技术团队维护。问题与建议请到 [Issues](../README.md#更新与反馈)。

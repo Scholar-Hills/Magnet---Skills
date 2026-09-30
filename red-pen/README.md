@@ -16,42 +16,50 @@
 
 ## 安装
 
-**先拿到目录。** 在小红书笔记下方的 RED Skill 组件里下载压缩包并解压。找到其中含有 `SKILL.md`、`scripts/`、`references/` 与 `examples/` 的 `red-pen` 文件夹，在它的上一级目录打开终端，让下面的 `./red-pen` 指向这份完整目录，再按平台安装。
+[仓库首页](../README.md#快速安装)提供在线安装命令。也可以先从首页下载仓库，或下载本 Skill 的完整文件夹，在该文件夹的上一级目录打开终端，再按提示选择目标 Agent：
 
-**Claude Code**
+```bash
+npx skills@latest add ./red-pen --skill red-pen
+```
+
+需要 Node.js 与 npm。默认安装到当前项目；希望跨项目使用时加 `--global`。这一步安装的是完整 Skill 目录，包括脚本与参考文档。
+
+也可指定客户端：
+
+```bash
+npx skills@latest add ./red-pen --skill red-pen --agent claude-code
+npx skills@latest add ./red-pen --skill red-pen --agent codex
+```
+
+不使用命令行安装器，或使用 WorkBuddy、小红书下载包时，请看[仓库安装指南](../README.md#手动安装)。复制整个 `red-pen/` 文件夹，不能只复制 `SKILL.md`。已有同名安装时先备份，避免形成嵌套目录。
+
+下载后手动安装到 Claude Code，也可以直接复制完整目录：
 
 ```bash
 mkdir -p ~/.claude/skills
 cp -R ./red-pen ~/.claude/skills/
 ```
 
-装完的样子是 `~/.claude/skills/red-pen/SKILL.md`。只想给某个项目用，就换成该项目下的 `.claude/skills/red-pen/`（同样要有 `red-pen` 这一层）。重开一个会话，输入 `/skills` 能看到 `red-pen` 就是装好了；然后丢一段稿子过去说「帮我看看」。
-
-**WorkBuddy（腾讯）**
+WorkBuddy 用户按客户端设置选择技能目录，例如：
 
 ```bash
 mkdir -p ~/.workbuddy-ai/skills
 cp -R ./red-pen ~/.workbuddy-ai/skills/
 ```
 
-WorkBuddy AI 5.4 的技能目录是 `~/.workbuddy-ai/skills/`；如果你的数据目录是 `~/.workbuddy/`，就放到 `~/.workbuddy/skills/red-pen`。装完在对话框输入 `/skills`，列表里有 `red-pen` 即可。
+安装后重开会话，让 Agent 使用 `red-pen`。选一个固定工作区保存后续产物，第一次使用时让 Agent 先读 `SKILL.md` 并运行其中的环境检查。运行脚本需要 Python 3.8 或更高版本，无第三方 Python 依赖。
 
-**用之前先选一个固定工作区**（输入框下方「Select Workspace」→ Open Local Folder，选一个专门放稿子的文件夹）。不选的话 WorkBuddy 会给每个任务新建一个 `~/WorkBuddy AI/<时间戳>/` 目录，同一篇稿子的历轮批注会散落在不同目录里，`stats` 就比不出「上一版的哪几条这次消失了」。
+如果稿件记录已经散落在多个工作区，让 Agent 按 `SKILL.md` 的说明检查；`doctor --scan` 只报告线索，不会搬动稿子或合并历史。
 
-已经散了就跑 `python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py doctor --scan` 查看线索；如果提示没有安全可扫的目录，就在 `--scan` 后加上你确认要扫描的目录。它只报告位置，不会搬动稿子或合并历史。
+## 开始试用
 
-**其他 Agent**（OpenClaw、Codex 等）：把 `red-pen` 目录放进各自的技能目录或工作区（OpenClaw 为 `~/.openclaw/workspace/skills/`），让 Agent 先读 `SKILL.md`。
+适合检查邮件、周报、推文与说明文档。先明确受众和目的，再逐句指出问题、解释原因并给出短改法；交付批注对应原句的红笔页，原稿由你自己修改。
 
-代码仓库目前还没有公开，暂不提供仓库克隆地址；开放之后会补上。有问题先在小红书笔记下留言。
-
-本机需要 `python3`（3.8+），没有别的依赖。在选好的工作区打开终端，按安装平台运行下面对应的一行，检查环境并核对工作区位置：
-
-```bash
-python3 ~/.claude/skills/red-pen/scripts/redpen.py doctor
-python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py doctor
+```text
+用 red-pen 看看这篇稿子，给同行看，希望他们读完愿意试用。
 ```
 
-它需要在你机器上运行 `python3` 来锚定批注，第一次会请求授权。
+[查看完整工作流](SKILL.md) · [浏览示例](examples/) · [反馈问题](../README.md#更新与反馈)
 
 ## 用法
 
@@ -107,4 +115,4 @@ python3 ~/.workbuddy-ai/skills/red-pen/scripts/redpen.py check ~/.workbuddy-ai/s
 
 ## 许可与维护
 
-MIT。由学霸山丘技术团队维护。问题与建议请在小红书笔记下留言；仓库公开后会补上 issue 入口。
+采用 [MIT 许可](../LICENSE)。由学霸山丘技术团队维护。问题与建议请到 [Issues](../README.md#更新与反馈)。
