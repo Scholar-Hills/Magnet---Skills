@@ -1,8 +1,8 @@
 # Magnet Skills｜学霸山丘教育工作流
 
-**把出题、批改、写作反馈与备课，变成有步骤、有证据、能复核的 Agent 工作流。**
+六个用于编程练习、批改、写作反馈和备课的 Agent Skills。
 
-由学霸山丘技术团队维护。每个 Skill 都包含工作流说明、本机校验脚本、格式契约与示例。你提供知识点、稿子或评分标准，Agent 按步骤处理，脚本检查结果，再交付可查看的报告。
+由学霸山丘技术团队维护。每个 Skill 附使用说明、校验脚本和示例，按需安装即可。
 
 [快速安装](#快速安装) · [选择一个-skill](#选择一个-skill) · [手动安装](#手动安装) · [贡献指南](CONTRIBUTING.md) · [问题反馈](https://github.com/Scholar-Hills/Magnet---Skills/issues)
 
@@ -14,7 +14,7 @@
 npx skills@latest add Scholar-Hills/Magnet---Skills
 ```
 
-只装一个，先从你的实际任务开始：
+只安装一个 Skill：
 
 ```bash
 npx skills@latest add Scholar-Hills/Magnet---Skills --skill red-pen
@@ -22,13 +22,13 @@ npx skills@latest add Scholar-Hills/Magnet---Skills --skill red-pen
 
 默认安装到当前项目；加 `--global` 可跨项目使用。安装器需要 Node.js 与 npm；Skill 脚本需要 Python 3.8 或更高版本。支持的客户端与安装选项见 [skills CLI 官方说明](https://github.com/vercel-labs/skills#install-a-skill)。
 
-先浏览列表，再决定装哪些：
+查看可安装的 Skill：
 
 ```bash
 npx skills@latest add Scholar-Hills/Magnet---Skills --list
 ```
 
-安装后重开 Agent 会话，选一个固定工作区，再说「使用 red-pen 帮我看看这篇稿子」。不同客户端的调用入口可能不同，也可以直接要求 Agent 读取已安装 Skill 的 `SKILL.md`。首次使用先按文档运行环境检查。
+安装后重开 Agent 会话，选一个固定工作区，再说使用 red-pen 帮我看看这篇稿子。不同客户端的调用入口可能不同，也可以直接要求 Agent 读取已安装 Skill 的 `SKILL.md`。首次使用先按文档运行环境检查。
 
 ## 选择一个 Skill
 
@@ -45,7 +45,7 @@ npx skills@latest add Scholar-Hills/Magnet---Skills --list
 
 说出知识点、语言和难度，让 Agent 出一道标准输入输出练习题。期望输出由参考解实际运行生成；出题时检查既定非解基线与错解，作答后本机判题，默认只揭开第一条失败的隐藏用例。支持 Python、JavaScript 与 Java。
 
-**试一句：**「出题 二分查找 Python 中等」。
+使用示例：出题 二分查找 Python 中等。
 
 ```bash
 npx skills@latest add Scholar-Hills/Magnet---Skills --skill coding-drill
@@ -57,7 +57,7 @@ npx skills@latest add Scholar-Hills/Magnet---Skills --skill coding-drill
 
 交一篇邮件、周报、推文或说明文档，先明确给谁看、希望达到什么，再逐句批注。脚本把引文定位到原文，未能定位的条目单列。提供针对原句的短改法，原稿由你自己改；下一版可对照旧引文的变化。
 
-**试一句：**「用 red-pen 看看这篇稿子，给同行看，希望他们愿意试用」。
+使用示例：用 red-pen 看看这篇稿子，给同行看，希望他们愿意试用。
 
 ```bash
 npx skills@latest add Scholar-Hills/Magnet---Skills --skill red-pen
@@ -69,7 +69,7 @@ npx skills@latest add Scholar-Hills/Magnet---Skills --skill red-pen
 
 把已有长文按原文拆成分段卡，逐段看语言、有没有回答子问题、有没有推进主论点。评审引用该段原文，修改后旧评审会标记过期。也可以从题目拆子问题开始，正文由你自己写。
 
-**试一句：**「用 essay-sections 帮我看看每段有没有回答自己的问题」。
+使用示例：用 essay-sections 帮我看看每段有没有回答自己的问题。
 
 ```bash
 npx skills@latest add Scholar-Hills/Magnet---Skills --skill essay-sections
@@ -79,9 +79,9 @@ npx skills@latest add Scholar-Hills/Magnet---Skills --skill essay-sections
 
 ### 备课工作流 · lesson-prep
 
-从课题、课时和学习目标开始，默认按「出作业 → 规划阶段 → 逐页写正文与讲稿 → 生成成品」推进。每步经脚本检查，投屏课件与教师讲稿分开交付，报告列出题目与页面的覆盖关系。覆盖检查不替代老师判断教学质量。
+从课题、课时和学习目标开始，默认按出作业 → 规划阶段 → 逐页写正文与讲稿 → 生成成品推进。每步经脚本检查，投屏课件与教师讲稿分开交付，报告列出题目与页面的覆盖关系。覆盖检查不替代老师判断教学质量。
 
-**试一句：**「用 lesson-prep 备一节城市湿地保护课，４５分钟，先确认学习目标」。
+使用示例：用 lesson-prep 备一节城市湿地保护课，４５分钟，先确认学习目标。
 
 ```bash
 npx skills@latest add Scholar-Hills/Magnet---Skills --skill lesson-prep
@@ -93,7 +93,7 @@ npx skills@latest add Scholar-Hills/Magnet---Skills --skill lesson-prep
 
 老师提供评分标准与一批简答，先确认条目表，再用满分范例与残缺版校准。每条命中判定引用作答原文，脚本核对证据与分值，交付个人判题卡和全班汇总。评分标准由老师提供，判定仍需老师复核。
 
-**试一句：**「用 rubric-grader 按我的标准批这批简答，先确认条目表」。
+使用示例：用 rubric-grader 按我的标准批这批简答，先确认条目表。
 
 ```bash
 npx skills@latest add Scholar-Hills/Magnet---Skills --skill rubric-grader
@@ -105,7 +105,7 @@ npx skills@latest add Scholar-Hills/Magnet---Skills --skill rubric-grader
 
 带上题目与自己的评分标准，先用空白、抄题面和无关文字做基线检查，再批真实答案。每条判定附原文证据，改完可交下一稿，记录未命中条目与进度。自批分数用于自查，不是考试或课程成绩。
 
-**试一句：**「用 self-grader 帮我自批这道题，题目和评分标准如下」。
+使用示例：用 self-grader 帮我自批这道题，题目和评分标准如下。
 
 ```bash
 npx skills@latest add Scholar-Hills/Magnet---Skills --skill self-grader
