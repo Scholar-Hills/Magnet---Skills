@@ -8,6 +8,8 @@ __pycache__/
 */examples/grading/*/export.json
 # 内部文档（spec/plan/审计含内部路径与生产数据），不进公开仓
 internal/
+# 仓库级宣发素材与内部验证记录，仅保留本地
+/docs/
 # SDD 工作区（账本/简报/审阅包），不进仓
 .superpowers/
 # agent worktree 检出
