@@ -1,0 +1,9 @@
+{
+  "commit": "635b444ca1cf687cc65a1461236e812ae0ae943f",
+  "files": {
+    "anchor.py": "8e76be8d9c2326a5d81f09ba46fb7dcd2e2313a445d98b2becec94f487d6dcd1",
+    "banned_words.py": "9320df5b6167803ab3584e526520214f192fedb5a8e7c21ae700abe4484906b2",
+    "redpen.py": "c7676a11f766a30bcd75da4d18efd65a66afb027bbb2ee9d8685dc8ec3104bd4"
+  },
+  "source": "red-pen/scripts"
+}

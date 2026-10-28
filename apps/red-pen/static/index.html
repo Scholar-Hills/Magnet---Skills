@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>红笔改稿 · 让每一句，都更接近你的本意</title>
+<meta name="description" content="逐句批注通知、邮件、推文与说明稿：指出问题，解释原因，把修改的决定留给你。">
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23fbf8f2'/%3E%3Cpath d='M7 25l2.2-7.2L20 7l5 5-10.8 10.8z' fill='%23a63028'/%3E%3Cpath d='M7 25l2.2-7.2 5 5z' fill='%23221f1b'/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="mark" href="/" aria-label="红笔改稿">红笔改稿</a>
+    <span class="mark-sub">只在稿子边上写字</span>
+    <span class="sim-chip" id="sim-chip" hidden>模拟批注</span>
+    <ol class="steps" aria-label="流程">
+      <li class="step" data-step="1">交稿</li>
+      <li class="step" data-step="2">确认目的</li>
+      <li class="step" data-step="3">红笔稿</li>
+    </ol>
+  </div>
+</header>
+
+<main id="main">
+  <!-- ─────────────────────────────── 1 交稿 -->
+  <section class="view" id="view-compose" aria-labelledby="compose-title">
+    <div class="compose-wrap">
+      <h1 id="compose-title">让每一句，都更接近你的本意。</h1>
+      <p class="lede">指出问题，解释原因，把修改的决定留给你。</p>
+
+      <div class="compose">
+        <label class="field-label" for="draft-input">把稿子贴在这里</label>
+        <textarea id="draft-input" rows="12" maxlength="20000" spellcheck="false"
+          placeholder="通知、邮件、推文、说明稿都可以。先支持粘贴文本和上传 TXT。"></textarea>
+        <div class="compose-row">
+          <span class="count" id="char-count">0 字</span>
+          <div class="compose-tools">
+            <button class="ghost" id="btn-upload" type="button">上传 TXT</button>
+            <input type="file" id="file-input" accept=".txt,text/plain" hidden>
+            <button class="ghost" id="btn-sample" type="button">试用示例</button>
+          </div>
+          <button class="primary" id="btn-start" type="button">交稿，开始批注</button>
+        </div>
+        <p class="hint" id="compose-note">稿件只存在你自己的会话里，不会进入公开示例。</p>
+        <p class="hint sample-hint" id="sample-hint" hidden>已填入一篇<b>合成的示例通知</b>（虚构学校与日期）。点「交稿」后走的是真实的批注与校验流程，不是预置结果。</p>
+      </div>
+
+      <ul class="promise">
+        <li>每条批注都指回原文里的那一句，指不回去的老实单列。</li>
+        <li>只给逐句意见，不给整篇重写，也不打分。</li>
+        <li>稿子一个字都不改，改不改由你决定。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────── 2 确认目的 -->
+  <section class="view" id="view-brief" aria-labelledby="brief-title" hidden>
+    <div class="compose-wrap">
+      <div class="recap">
+        <span class="recap-label" id="recap-label">这一稿</span>
+        <p class="recap-text" id="recap-text"></p>
+        <button class="ghost small" id="btn-back-compose" type="button">换一篇</button>
+      </div>
+
+      <h2 id="brief-title">先说清这三件事</h2>
+      <p class="lede">批注的标准跟着这三件事走。已经说过的不用再写。</p>
+
+      <form id="brief-form" novalidate>
+        <div class="field">
+          <label for="q-audience">给谁看</label>
+          <input id="q-audience" type="text" maxlength="300" autocomplete="off"
+            placeholder="同行、客户、家长、老板，还是在什么场合读">
+          <p class="hint">写清人和场合，比写「读者」有用得多。</p>
+        </div>
+        <div class="field">
+          <label for="q-purpose">希望读者做什么</label>
+          <input id="q-purpose" type="text" maxlength="300" autocomplete="off"
+            placeholder="读完愿意报名、知道下一步做什么、改变某个看法">
+        </div>
+        <div class="field">
+          <label for="q-worries">最担心被怎样理解</label>
+          <input id="q-worries" type="text" maxlength="300" autocomplete="off"
+            placeholder="推销、说教、含糊、没依据……">
+          <p class="hint">多条用顿号或逗号分开，最多五条。</p>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="q-generic">
+          <span>按通用标准批，不指定受众</span>
+        </label>
+
+        <div class="submit-row">
+          <p class="disclosure" id="disclosure">正在确认模型的配置……</p>
+          <button class="primary" id="btn-generate" type="submit">开始批注</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────── 3 进行中 -->
+  <section class="view" id="view-run" aria-labelledby="run-title" hidden>
+    <div class="compose-wrap narrow">
+      <h2 id="run-title">正在批这一稿</h2>
+      <ol class="stages" id="stages" aria-live="polite"></ol>
+      <p class="hint">没有百分比：每一步都是真的跑完了才翻到下一行。</p>
+      <div class="run-context" id="run-context"></div>
+      <div class="run-error" id="run-error" hidden></div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────── 4 红笔稿 -->
+  <section class="view wide" id="view-result" aria-labelledby="result-title" hidden>
+    <div class="result-head">
+      <div>
+        <h2 id="result-title" class="result-title">红笔稿</h2>
+        <p class="result-meta" id="result-meta"></p>
+      </div>
+      <div class="result-actions">
+        <button class="ghost" id="btn-open-report" type="button">引擎原页</button>
+        <button class="ghost" id="btn-download" type="button">下载红笔稿</button>
+        <button class="ghost" id="btn-change-brief" type="button">改写作目的</button>
+        <button class="primary" id="btn-revise" type="button">我来改，再看一版</button>
+      </div>
+    </div>
+
+    <div class="banner" id="sim-banner" hidden></div>
+    <div class="banner warn" id="stale-banner" hidden></div>
+
+    <div class="split">
+      <div class="pane pane-draft" id="draft-pane" aria-label="稿件原文与批注位置"></div>
+      <div class="pane pane-notes" id="notes-pane" aria-label="批注"></div>
+    </div>
+    <div class="mobile-flow" id="flow-pane"></div>
+
+    <section class="unlocated" id="unlocated" hidden>
+      <h3 id="unlocated-title">未能定位</h3>
+      <p class="hint">下面这几条在稿件正文里找不到对应的原句。脚本不擅自摆放，也不假装已经找到。</p>
+      <ul id="unlocated-list"></ul>
+    </section>
+
+    <section class="compare" id="compare" hidden>
+      <h3>这一版和上一版</h3>
+      <ul id="compare-list"></ul>
+      <p class="caveat">「旧引文找不到」只说明这句话在现在的稿子里搜不到了，不等于问题已解决，也不等于建议被采纳。仍能找到的句子也可能被改过。</p>
+    </section>
+
+    <section class="revise" id="revise-panel" hidden>
+      <h3>你自己改，改完再看一版</h3>
+      <p class="hint">红笔不改你的稿子。要动笔，就在这里改；提交后会作为同一篇稿件的新版本处理，旧稿和旧批注都留着。</p>
+      <label class="field-label" for="revise-input">第 <span id="revise-next">2</span> 版正文</label>
+      <textarea id="revise-input" rows="16" spellcheck="false"></textarea>
+      <div class="revise-row">
+        <span class="count" id="revise-count"></span>
+        <button class="ghost" id="btn-revise-cancel" type="button">先不改</button>
+        <button class="primary" id="btn-revise-submit" type="button">提交新一版</button>
+      </div>
+      <p class="hint" id="revise-note"></p>
+    </section>
+
+    <p class="foot">批注由脚本锚定，未定位条目脚本不擅自摆放。原稿自始至终由你保管。</p>
+  </section>
+</main>
+
+<div class="back-jump" id="back-jump" hidden>
+  <button class="ghost small" id="btn-back-jump" type="button">回到刚才读的地方</button>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
