@@ -94,6 +94,7 @@ node tests/browser.mjs      # 40 项：40 通过（需 playwright-core 与本机
 REDPEN_ALLOW_MOCK=1 python3 server.py
 ```
 
+部署前先删掉本机的 `.data/`：那是访客数据，会随目录一起上传到沙箱。
 模型配置建议用环境变量注入（不要把密钥写进代码）。若用 `config.local.json`，它会随目录一起
 上传到沙箱，但没有任何路由能读到它（静态目录只开放 `static/`）。
 

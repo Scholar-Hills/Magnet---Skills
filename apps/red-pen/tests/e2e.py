@@ -209,6 +209,16 @@ def test_main_flow(base_env):
         status, _raw, _h = client.raw("/api/report?version=1")
         check("第 1 版仍能查看", status == 200)
 
+        # 改写作目的 → 旧结果作废，不能继续当当前有效评审
+        status, rebrief = client.call("/api/brief", {
+            "audience": "区教育局的检查人员", "purpose": "证明学校已经通知到位", "worries": []})
+        check("改写作目的会作废旧批注", status == 200 and rebrief.get("invalidated") is True,
+              json.dumps(rebrief, ensure_ascii=False)[:200])
+        status, after = client.call("/api/state")
+        review = after.get("state", {}).get("review", {})
+        check("作废后不再给出旧的评审视图", review.get("stale") is True and "view" not in after.get("state", {}),
+              json.dumps(review, ensure_ascii=False)[:300])
+
         # 会话隔离
         other = Client(server.base)
         status, other_state = other.call("/api/state")
